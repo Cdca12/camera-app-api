@@ -2,6 +2,8 @@ FROM python:3.10-slim
 
 WORKDIR /app
 
+ENV TF_USE_LEGACY_KERAS=1
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     libgl1 \

@@ -5,3 +5,4 @@ deepface
 opencv-python
 pillow
 numpy
+tf-keras
