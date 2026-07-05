@@ -2,7 +2,7 @@ fastapi
 uvicorn[standard]
 python-multipart
 deepface
-opencv-python
+opencv-python==4.12.0.88
 pillow
 numpy
 tf-keras

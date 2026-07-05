@@ -4,6 +4,7 @@ from deepface import DeepFace
 from PIL import Image
 import numpy as np
 import io
+import os
 
 
 app = FastAPI(
@@ -13,13 +14,27 @@ app = FastAPI(
 )
 
 
+def get_allowed_origins() -> list[str]:
+    default_origins = [
+        "https://camera-app-front.vercel.app",
+    ]
+    extra_origins = os.getenv("CORS_ORIGINS", "")
+
+    return default_origins + [
+        origin.strip()
+        for origin in extra_origins.split(",")
+        if origin.strip()
+    ]
+
+
+def get_allowed_origin_regex() -> str:
+    return os.getenv("CORS_ORIGIN_REGEX") or None
+
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
-    allow_origin_regex=r"http://(localhost|127\.0\.0\.1):\d+",
+    allow_origins=get_allowed_origins(),
+    allow_origin_regex=get_allowed_origin_regex(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

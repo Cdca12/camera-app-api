@@ -15,3 +15,18 @@ FastAPI + DeepFace API para estimar edad y género desde un frame enviado por mu
 
 - `GET /health`
 - `POST /analyze-frame`
+
+## Deploy con frontend en Vercel
+
+Configura el frontend para llamar a la URL publica del backend, no a una ruta relativa de Vercel.
+Por ejemplo:
+
+```env
+VITE_API_BASE_URL=https://tu-backend.example.com
+```
+
+El backend acepta por default solo el dominio del frontend:
+
+```env
+CORS_ORIGINS=https://camera-app-front.vercel.app
+```

@@ -15,7 +15,7 @@ COPY requirements.txt .
 RUN python -m pip install --upgrade pip
 RUN python -m pip install --no-cache-dir -r requirements.txt
 
-# Fix para el Haar Cascade de OpenCV, porque en tu Mac ya vimos que podía faltar.
+# Fix para Haar Cascades de OpenCV, porque DeepFace los necesita con detector_backend="opencv".
 RUN python - <<'PY'
 import cv2
 from pathlib import Path
@@ -24,15 +24,24 @@ import urllib.request
 cascade_dir = Path(cv2.data.haarcascades)
 cascade_dir.mkdir(parents=True, exist_ok=True)
 
-cascade_file = cascade_dir / "haarcascade_frontalface_default.xml"
+cascades = {
+    "haarcascade_frontalface_default.xml": (
+        "https://raw.githubusercontent.com/opencv/opencv/master/data/haarcascades/"
+        "haarcascade_frontalface_default.xml"
+    ),
+    "haarcascade_eye.xml": (
+        "https://raw.githubusercontent.com/opencv/opencv/master/data/haarcascades/"
+        "haarcascade_eye.xml"
+    ),
+}
 
-if not cascade_file.exists():
-    urllib.request.urlretrieve(
-        "https://raw.githubusercontent.com/opencv/opencv/master/data/haarcascades/haarcascade_frontalface_default.xml",
-        cascade_file,
-    )
+for filename, url in cascades.items():
+    cascade_file = cascade_dir / filename
 
-print("Cascade file exists:", cascade_file.exists())
+    if not cascade_file.exists():
+        urllib.request.urlretrieve(url, cascade_file)
+
+    print(f"{filename} exists:", cascade_file.exists())
 PY
 
 COPY . .
