@@ -22,7 +22,7 @@ Configura el frontend para llamar a la URL publica del backend, no a una ruta re
 Por ejemplo:
 
 ```env
-VITE_API_BASE_URL=https://tu-backend.example.com
+VITE_API_BASE_URL=https://cdca12-camera-app-api.hf.space
 ```
 
 El backend acepta por default solo el dominio del frontend:

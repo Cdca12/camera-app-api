@@ -49,6 +49,15 @@ def health():
     }
 
 
+@app.get("/")
+def root():
+    return {
+        "service": "camera-app-api",
+        "health": "/health",
+        "analyze_frame": "/analyze-frame",
+    }
+
+
 @app.post("/analyze-frame")
 async def analyze_frame(file: UploadFile = File(...)):
     if not file.content_type or not file.content_type.startswith("image/"):
