@@ -1,10 +1,31 @@
-from fastapi import FastAPI, File, UploadFile, HTTPException
+from fastapi import FastAPI, File, UploadFile, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from deepface import DeepFace
 from PIL import Image
 import numpy as np
+import cv2
 import io
 import os
+
+
+def load_local_env() -> None:
+    env_path = ".env"
+
+    if not os.path.exists(env_path):
+        return
+
+    with open(env_path, encoding="utf-8") as env_file:
+        for line in env_file:
+            line = line.strip()
+
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+
+            key, value = line.split("=", 1)
+            os.environ.setdefault(key.strip(), value.strip().strip("\"'"))
+
+
+load_local_env()
 
 
 app = FastAPI(
@@ -55,6 +76,8 @@ def root():
         "service": "camera-app-api",
         "health": "/health",
         "analyze_frame": "/analyze-frame",
+        "camera_frame": "/camera-frame",
+        "analyze_camera_frame": "/analyze-camera-frame",
     }
 
 
@@ -76,24 +99,44 @@ async def analyze_frame(file: UploadFile = File(...)):
 
     try:
         image_np = load_image_as_numpy(image_bytes)
+        return analyze_image(image_np)
 
-        result = DeepFace.analyze(
-            img_path=image_np,
-            actions=["age", "gender"],
-            detector_backend="opencv",
-            enforce_detection=False,
-            silent=True,
-        )
-
-        faces = result if isinstance(result, list) else [result]
-        normalized_faces = [normalize_face(face) for face in faces]
-
+    except Exception as error:
         return {
-            "success": True,
-            "people_count": len(normalized_faces),
-            "faces": normalized_faces,
+            "success": False,
+            "error": str(error),
+            "people_count": 0,
+            "faces": [],
         }
 
+
+@app.get("/camera-frame")
+def camera_frame():
+    frame = capture_camera_frame()
+    success, encoded_frame = cv2.imencode(".jpg", frame)
+
+    if not success:
+        raise HTTPException(
+            status_code=500,
+            detail="No se pudo convertir el frame de la cámara a JPEG.",
+        )
+
+    return Response(
+        content=encoded_frame.tobytes(),
+        media_type="image/jpeg",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
+@app.post("/analyze-camera-frame")
+def analyze_camera_frame():
+    try:
+        frame = capture_camera_frame()
+        image_np = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        return analyze_image(image_np)
+
+    except HTTPException:
+        raise
     except Exception as error:
         return {
             "success": False,
@@ -106,6 +149,79 @@ async def analyze_frame(file: UploadFile = File(...)):
 def load_image_as_numpy(image_bytes: bytes) -> np.ndarray:
     image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
     return np.array(image)
+
+
+def analyze_image(image_np: np.ndarray) -> dict:
+    result = DeepFace.analyze(
+        img_path=image_np,
+        actions=["age", "gender"],
+        detector_backend="opencv",
+        enforce_detection=False,
+        silent=True,
+    )
+
+    faces = result if isinstance(result, list) else [result]
+    normalized_faces = [normalize_face(face) for face in faces]
+
+    return {
+        "success": True,
+        "people_count": len(normalized_faces),
+        "faces": normalized_faces,
+    }
+
+
+def capture_camera_frame() -> np.ndarray:
+    camera_source = get_camera_source()
+    timeout_ms = get_camera_timeout_ms()
+    capture = cv2.VideoCapture()
+    capture.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, timeout_ms)
+    capture.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, timeout_ms)
+
+    try:
+        if not capture.open(camera_source):
+            raise HTTPException(
+                status_code=503,
+                detail="No se pudo abrir la cámara de vigilancia.",
+            )
+
+        success, frame = capture.read()
+
+        if not success or frame is None:
+            raise HTTPException(
+                status_code=503,
+                detail="No se pudo leer un frame de la cámara de vigilancia.",
+            )
+
+        return frame
+    finally:
+        capture.release()
+
+
+def get_camera_source():
+    camera_source = os.getenv("CAMERA_SOURCE", "").strip()
+
+    if not camera_source:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Configura CAMERA_SOURCE con la URL RTSP/HTTP de la cámara "
+                "de vigilancia."
+            ),
+        )
+
+    if camera_source.isdigit():
+        return int(camera_source)
+
+    return camera_source
+
+
+def get_camera_timeout_ms() -> int:
+    timeout = os.getenv("CAMERA_TIMEOUT_MS", "5000")
+
+    try:
+        return int(timeout)
+    except ValueError:
+        return 5000
 
 
 def normalize_face(face: dict) -> dict:
