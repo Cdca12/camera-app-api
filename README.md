@@ -11,6 +11,11 @@ app_port: 7860
 
 FastAPI + DeepFace API para estimar edad y género desde un frame enviado por multipart/form-data.
 
+## Ejecutable Windows
+
+Para correr la API en una PC remota del negocio como `CameraAppAPI.exe`, revisa
+[`README_EXE.md`](README_EXE.md).
+
 ## Endpoints
 
 - `GET /health`
