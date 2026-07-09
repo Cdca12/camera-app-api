@@ -9,8 +9,11 @@ import numpy as np
 import cv2
 import io
 import os
+from contextlib import contextmanager
 from urllib.parse import quote
 from typing import Optional
+
+cv2.setLogLevel(0)
 
 
 def load_local_env() -> None:
@@ -215,13 +218,16 @@ def capture_camera_frame(channel: Optional[str] = None) -> np.ndarray:
     capture.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, timeout_ms)
 
     try:
-        if not capture.open(camera_source):
-            raise HTTPException(
-                status_code=503,
-                detail="No se pudo abrir la cámara de vigilancia.",
-            )
+        with suppress_stderr():
+            is_opened = capture.open(camera_source)
 
-        success, frame = capture.read()
+            if not is_opened:
+                raise HTTPException(
+                    status_code=503,
+                    detail="No se pudo abrir la cámara de vigilancia.",
+                )
+
+            success, frame = capture.read()
 
         if not success or frame is None:
             raise HTTPException(
@@ -384,6 +390,21 @@ def normalize_channel(channel: Optional[str]) -> Optional[str]:
 
     channel = str(channel).strip()
     return channel or None
+
+
+@contextmanager
+def suppress_stderr():
+    stderr_fd = 2
+    saved_stderr_fd = os.dup(stderr_fd)
+    devnull_fd = os.open(os.devnull, os.O_WRONLY)
+
+    try:
+        os.dup2(devnull_fd, stderr_fd)
+        yield
+    finally:
+        os.dup2(saved_stderr_fd, stderr_fd)
+        os.close(saved_stderr_fd)
+        os.close(devnull_fd)
 
 
 runtime_camera_config = get_initial_runtime_camera_config()
