@@ -24,6 +24,7 @@ Para correr la API en una PC remota del negocio como `CameraAppAPI.exe`, revisa
 - `GET /camera-frame`
 - `POST /analyze-camera-frame`
 - `POST /watch-camera-frame`
+- `POST /watch-uploaded-frame`
 
 ## Cámara de vigilancia
 
@@ -109,8 +110,20 @@ Para revisar la cámara con menor costo, usa:
 POST /watch-camera-frame?channel=<canal>&camera_name=<nombre>
 ```
 
+Para revisar frames enviados desde la cámara del dispositivo, usa:
+
+```http
+POST /watch-uploaded-frame
+Content-Type: multipart/form-data
+```
+
+```text
+file=<imagen jpg/png>
+```
+
 Este endpoint captura un frame, detecta caras con OpenCV y mantiene un cache en
-memoria por cámara/canal. Si no hay caras nuevas responde:
+memoria por cámara/canal o por cámara del dispositivo. Si no hay caras nuevas
+responde:
 
 ```json
 {

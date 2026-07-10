@@ -106,6 +106,7 @@ def root():
         "camera_frame": "/camera-frame",
         "analyze_camera_frame": "/analyze-camera-frame",
         "watch_camera_frame": "/watch-camera-frame",
+        "watch_uploaded_frame": "/watch-uploaded-frame",
     }
 
 
@@ -199,53 +200,55 @@ def watch_camera_frame(
 ):
     try:
         frame = capture_camera_frame(channel)
-        detected_faces = detect_light_faces(frame)
-
-        if not detected_faces:
-            return {
-                "success": True,
-                "has_new_faces": False,
-                "faces": [],
-            }
-
         cache_key = get_face_cache_key(channel, camera_name)
-        new_faces = get_new_light_faces(frame, detected_faces, cache_key)
-
-        if not new_faces:
-            return {
-                "success": True,
-                "has_new_faces": False,
-                "faces": [],
-            }
-
-        analyzed_faces = []
-
-        for detected_face in new_faces:
-            face_crop = crop_detected_face(frame, detected_face)
-
-            if face_crop.size == 0:
-                continue
-
-            image_np = cv2.cvtColor(face_crop, cv2.COLOR_BGR2RGB)
-            analysis = analyze_image(image_np)
-            remember_light_face(cache_key, detected_face)
-
-            for analyzed_face in analysis["faces"]:
-                analyzed_face["source"] = "Red"
-                analyzed_face["camera_name"] = camera_name
-                analyzed_face["channel"] = channel
-                analyzed_face["region"] = detected_face["region"]
-                analyzed_faces.append(analyzed_face)
-
-        return {
-            "success": True,
-            "has_new_faces": bool(analyzed_faces),
-            "people_count": len(analyzed_faces),
-            "faces": analyzed_faces,
-        }
+        return watch_frame_for_new_faces(
+            frame=frame,
+            cache_key=cache_key,
+            source="Red",
+            camera_name=camera_name,
+            channel=channel,
+        )
 
     except HTTPException:
         raise
+    except Exception as error:
+        return {
+            "success": False,
+            "error": str(error),
+            "has_new_faces": False,
+            "people_count": 0,
+            "faces": [],
+        }
+
+
+@app.post("/watch-uploaded-frame")
+async def watch_uploaded_frame(file: UploadFile = File(...)):
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(
+            status_code=400,
+            detail="El archivo debe ser una imagen.",
+        )
+
+    image_bytes = await file.read()
+
+    if not image_bytes:
+        raise HTTPException(
+            status_code=400,
+            detail="La imagen está vacía.",
+        )
+
+    try:
+        image_np = load_image_as_numpy(image_bytes)
+        frame = cv2.cvtColor(image_np, cv2.COLOR_RGB2BGR)
+
+        return watch_frame_for_new_faces(
+            frame=frame,
+            cache_key="uploaded:device-camera",
+            source="Dispositivo",
+            camera_name="Dispositivo",
+            channel=None,
+        )
+
     except Exception as error:
         return {
             "success": False,
@@ -514,6 +517,58 @@ def resize_frame_for_detection(frame: np.ndarray) -> tuple[np.ndarray, float]:
         interpolation=cv2.INTER_AREA,
     )
     return resized_frame, scale
+
+
+def watch_frame_for_new_faces(
+    frame: np.ndarray,
+    cache_key: str,
+    source: str,
+    camera_name: Optional[str],
+    channel: Optional[str],
+) -> dict:
+    detected_faces = detect_light_faces(frame)
+
+    if not detected_faces:
+        return {
+            "success": True,
+            "has_new_faces": False,
+            "faces": [],
+        }
+
+    new_faces = get_new_light_faces(frame, detected_faces, cache_key)
+
+    if not new_faces:
+        return {
+            "success": True,
+            "has_new_faces": False,
+            "faces": [],
+        }
+
+    analyzed_faces = []
+
+    for detected_face in new_faces:
+        face_crop = crop_detected_face(frame, detected_face)
+
+        if face_crop.size == 0:
+            continue
+
+        image_np = cv2.cvtColor(face_crop, cv2.COLOR_BGR2RGB)
+        analysis = analyze_image(image_np)
+        remember_light_face(cache_key, detected_face)
+
+        for analyzed_face in analysis["faces"]:
+            analyzed_face["source"] = source
+            analyzed_face["camera_name"] = camera_name
+            analyzed_face["channel"] = channel
+            analyzed_face["region"] = detected_face["region"]
+            analyzed_faces.append(analyzed_face)
+
+    return {
+        "success": True,
+        "has_new_faces": bool(analyzed_faces),
+        "people_count": len(analyzed_faces),
+        "faces": analyzed_faces,
+    }
 
 
 def get_new_light_faces(
