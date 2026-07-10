@@ -12,6 +12,7 @@ import os
 from contextlib import contextmanager
 from urllib.parse import quote
 from typing import Optional
+import time
 
 cv2.setLogLevel(0)
 
@@ -45,6 +46,10 @@ class CameraConfig(BaseModel):
 
 
 runtime_camera_config: dict[str, str] = {}
+face_cache: dict[str, list[dict]] = {}
+face_detector = cv2.CascadeClassifier(
+    cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+)
 
 
 app = FastAPI(
@@ -100,6 +105,7 @@ def root():
         "analyze_frame": "/analyze-frame",
         "camera_frame": "/camera-frame",
         "analyze_camera_frame": "/analyze-camera-frame",
+        "watch_camera_frame": "/watch-camera-frame",
     }
 
 
@@ -181,6 +187,70 @@ def analyze_camera_frame(
         return {
             "success": False,
             "error": str(error),
+            "people_count": 0,
+            "faces": [],
+        }
+
+
+@app.post("/watch-camera-frame")
+def watch_camera_frame(
+    channel: Optional[str] = None,
+    camera_name: Optional[str] = None,
+):
+    try:
+        frame = capture_camera_frame(channel)
+        detected_faces = detect_light_faces(frame)
+
+        if not detected_faces:
+            return {
+                "success": True,
+                "has_new_faces": False,
+                "faces": [],
+            }
+
+        cache_key = get_face_cache_key(channel, camera_name)
+        new_faces = get_new_light_faces(frame, detected_faces, cache_key)
+
+        if not new_faces:
+            return {
+                "success": True,
+                "has_new_faces": False,
+                "faces": [],
+            }
+
+        analyzed_faces = []
+
+        for detected_face in new_faces:
+            face_crop = crop_detected_face(frame, detected_face)
+
+            if face_crop.size == 0:
+                continue
+
+            image_np = cv2.cvtColor(face_crop, cv2.COLOR_BGR2RGB)
+            analysis = analyze_image(image_np)
+            remember_light_face(cache_key, detected_face)
+
+            for analyzed_face in analysis["faces"]:
+                analyzed_face["source"] = "Red"
+                analyzed_face["camera_name"] = camera_name
+                analyzed_face["channel"] = channel
+                analyzed_face["region"] = detected_face["region"]
+                analyzed_faces.append(analyzed_face)
+
+        return {
+            "success": True,
+            "has_new_faces": bool(analyzed_faces),
+            "people_count": len(analyzed_faces),
+            "faces": analyzed_faces,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as error:
+        return {
+            "success": False,
+            "error": str(error),
+            "has_new_faces": False,
             "people_count": 0,
             "faces": [],
         }
@@ -390,6 +460,203 @@ def normalize_channel(channel: Optional[str]) -> Optional[str]:
 
     channel = str(channel).strip()
     return channel or None
+
+
+def detect_light_faces(frame: np.ndarray) -> list[dict]:
+    if face_detector.empty():
+        raise HTTPException(
+            status_code=500,
+            detail="No se pudo cargar el detector ligero de caras de OpenCV.",
+        )
+
+    detection_frame, scale = resize_frame_for_detection(frame)
+    gray_frame = cv2.cvtColor(detection_frame, cv2.COLOR_BGR2GRAY)
+    equalized_frame = cv2.equalizeHist(gray_frame)
+    detections = face_detector.detectMultiScale(
+        equalized_frame,
+        scaleFactor=1.1,
+        minNeighbors=5,
+        minSize=(50, 50),
+    )
+
+    return [
+        {
+            "region": {
+                "x": int(x / scale),
+                "y": int(y / scale),
+                "w": int(w / scale),
+                "h": int(h / scale),
+            },
+            "signature": build_face_signature(
+                frame,
+                int(x / scale),
+                int(y / scale),
+                int(w / scale),
+                int(h / scale),
+            ),
+        }
+        for (x, y, w, h) in detections
+    ]
+
+
+def resize_frame_for_detection(frame: np.ndarray) -> tuple[np.ndarray, float]:
+    target_width = get_face_detect_width()
+    height, width = frame.shape[:2]
+
+    if target_width <= 0 or width <= target_width:
+        return frame, 1.0
+
+    scale = target_width / float(width)
+    target_height = int(height * scale)
+    resized_frame = cv2.resize(
+        frame,
+        (target_width, target_height),
+        interpolation=cv2.INTER_AREA,
+    )
+    return resized_frame, scale
+
+
+def get_new_light_faces(
+    frame: np.ndarray,
+    detected_faces: list[dict],
+    cache_key: str,
+) -> list[dict]:
+    now = time.time()
+    ttl_seconds = get_face_cache_ttl_seconds()
+    cached_faces = prune_face_cache(cache_key, now, ttl_seconds)
+    new_faces = []
+
+    for detected_face in detected_faces:
+        signature = detected_face["signature"]
+
+        if is_known_face(signature, cached_faces):
+            continue
+
+        new_faces.append(detected_face)
+
+    face_cache[cache_key] = cached_faces
+    return new_faces
+
+
+def remember_light_face(cache_key: str, detected_face: dict) -> None:
+    now = time.time()
+    ttl_seconds = get_face_cache_ttl_seconds()
+    cached_faces = prune_face_cache(cache_key, now, ttl_seconds)
+    cached_faces.append(
+        {
+            "signature": detected_face["signature"],
+            "last_seen": now,
+            "region": detected_face["region"],
+        }
+    )
+    face_cache[cache_key] = cached_faces
+
+
+def prune_face_cache(cache_key: str, now: float, ttl_seconds: int) -> list[dict]:
+    cached_faces = face_cache.get(cache_key, [])
+
+    if ttl_seconds <= 0:
+        return []
+
+    return [
+        cached_face
+        for cached_face in cached_faces
+        if now - cached_face["last_seen"] <= ttl_seconds
+    ]
+
+
+def is_known_face(signature: np.ndarray, cached_faces: list[dict]) -> bool:
+    threshold = get_face_match_threshold()
+
+    for cached_face in cached_faces:
+        distance = float(np.mean(np.abs(signature - cached_face["signature"])))
+
+        if distance <= threshold:
+            cached_face["last_seen"] = time.time()
+            return True
+
+    return False
+
+
+def build_face_signature(
+    frame: np.ndarray,
+    x: int,
+    y: int,
+    w: int,
+    h: int,
+) -> np.ndarray:
+    face_crop = crop_face_region(frame, x, y, w, h, margin_ratio=0.15)
+    gray_face = cv2.cvtColor(face_crop, cv2.COLOR_BGR2GRAY)
+    resized_face = cv2.resize(gray_face, (32, 32), interpolation=cv2.INTER_AREA)
+    normalized_face = resized_face.astype("float32") / 255.0
+    normalized_face = cv2.equalizeHist((normalized_face * 255).astype("uint8"))
+    return normalized_face.astype("float32") / 255.0
+
+
+def crop_detected_face(frame: np.ndarray, detected_face: dict) -> np.ndarray:
+    region = detected_face["region"]
+    return crop_face_region(
+        frame,
+        region["x"],
+        region["y"],
+        region["w"],
+        region["h"],
+        margin_ratio=0.35,
+    )
+
+
+def crop_face_region(
+    frame: np.ndarray,
+    x: int,
+    y: int,
+    w: int,
+    h: int,
+    margin_ratio: float,
+) -> np.ndarray:
+    height, width = frame.shape[:2]
+    margin_x = int(w * margin_ratio)
+    margin_y = int(h * margin_ratio)
+    x1 = max(0, x - margin_x)
+    y1 = max(0, y - margin_y)
+    x2 = min(width, x + w + margin_x)
+    y2 = min(height, y + h + margin_y)
+    return frame[y1:y2, x1:x2]
+
+
+def get_face_cache_key(
+    channel: Optional[str],
+    camera_name: Optional[str],
+) -> str:
+    channel_key = normalize_channel(channel) or "default"
+    camera_key = (camera_name or "camera").strip() or "camera"
+    return f"{camera_key}:{channel_key}"
+
+
+def get_face_cache_ttl_seconds() -> int:
+    value = os.getenv("FACE_CACHE_TTL_SECONDS", "300")
+
+    try:
+        return int(value)
+    except ValueError:
+        return 300
+
+
+def get_face_match_threshold() -> float:
+    value = os.getenv("FACE_MATCH_THRESHOLD", "0.18")
+
+    try:
+        return float(value)
+    except ValueError:
+        return 0.18
+
+
+def get_face_detect_width() -> int:
+    value = os.getenv("FACE_DETECT_WIDTH", "640")
+
+    try:
+        return int(value)
+    except ValueError:
+        return 640
 
 
 @contextmanager

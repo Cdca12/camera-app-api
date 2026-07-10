@@ -23,6 +23,7 @@ Para correr la API en una PC remota del negocio como `CameraAppAPI.exe`, revisa
 - `POST /analyze-frame`
 - `GET /camera-frame`
 - `POST /analyze-camera-frame`
+- `POST /watch-camera-frame`
 
 ## Cámara de vigilancia
 
@@ -99,6 +100,48 @@ CAMERA_TIMEOUT_MS=5000
 `GET /camera-frame` devuelve un JPEG del frame actual. También acepta
 `?channel=<canal>`. `POST /analyze-camera-frame` captura un frame y lo analiza
 con DeepFace; también acepta `?channel=<canal>&camera_name=<nombre>`.
+
+## Monitoreo ligero de caras nuevas
+
+Para revisar la cámara con menor costo, usa:
+
+```http
+POST /watch-camera-frame?channel=<canal>&camera_name=<nombre>
+```
+
+Este endpoint captura un frame, detecta caras con OpenCV y mantiene un cache en
+memoria por cámara/canal. Si no hay caras nuevas responde:
+
+```json
+{
+  "success": true,
+  "has_new_faces": false,
+  "faces": []
+}
+```
+
+Si detecta una cara nueva, entonces corre DeepFace para edad/género y responde:
+
+```json
+{
+  "success": true,
+  "has_new_faces": true,
+  "faces": []
+}
+```
+
+Variables opcionales:
+
+```env
+FACE_CACHE_TTL_SECONDS=300
+FACE_MATCH_THRESHOLD=0.18
+FACE_DETECT_WIDTH=640
+```
+
+`FACE_CACHE_TTL_SECONDS` define cuánto tiempo una cara vista queda en cache.
+`FACE_MATCH_THRESHOLD` ajusta qué tan parecidas deben ser dos caras para tratarse
+como la misma persona. `FACE_DETECT_WIDTH` reduce el frame antes de detectar
+caras para que el monitoreo sea más ligero.
 
 Para desarrollo local puedes guardar `CAMERA_SOURCE` en un archivo `.env`.
 
