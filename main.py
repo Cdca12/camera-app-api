@@ -53,6 +53,10 @@ class CameraConfig(BaseModel):
     path_template: str = "/Streaming/Channels/{channel}"
 
 
+class CameraChannelScanRequest(BaseModel):
+    max_channels: int = 16
+
+
 class StoreSettings(BaseModel):
     name: str
     code: str
@@ -127,6 +131,7 @@ def root():
         "dashboard_daily": "/dashboard/daily",
         "dashboard_summary": "/dashboard/summary",
         "camera_config": "/camera-config",
+        "camera_channel_scan": "/camera-channels/scan",
         "analyze_frame": "/analyze-frame",
         "camera_frame": "/camera-frame",
         "analyze_camera_frame": "/analyze-camera-frame",
@@ -192,6 +197,47 @@ def camera_config(config: CameraConfig):
     return {
         "success": True,
         "config": get_public_camera_config(runtime_camera_config),
+    }
+
+
+@app.post("/camera-channels/scan")
+def scan_camera_channels(request: CameraChannelScanRequest):
+    max_channels = max(1, min(request.max_channels, 64))
+    discovered_cameras = []
+
+    try:
+        get_camera_source("101")
+    except HTTPException as error:
+        raise HTTPException(
+            status_code=400,
+            detail="Configura primero la conexión RTSP antes de escanear canales.",
+        ) from error
+
+    for camera_number in range(1, max_channels + 1):
+        channel = f"{camera_number}01"
+
+        try:
+            frame = capture_camera_frame(
+                channel,
+                timeout_ms=get_camera_scan_timeout_ms(),
+            )
+        except HTTPException:
+            continue
+
+        height, width = frame.shape[:2]
+        discovered_cameras.append(
+            {
+                "name": f"Cámara {camera_number}",
+                "channel": channel,
+                "width": width,
+                "height": height,
+            }
+        )
+
+    return {
+        "success": True,
+        "scanned_channels": max_channels,
+        "cameras": discovered_cameras,
     }
 
 
@@ -363,9 +409,12 @@ def analyze_image(image_np: np.ndarray) -> dict:
     }
 
 
-def capture_camera_frame(channel: Optional[str] = None) -> np.ndarray:
+def capture_camera_frame(
+    channel: Optional[str] = None,
+    timeout_ms: Optional[int] = None,
+) -> np.ndarray:
     camera_source = get_camera_source(channel)
-    timeout_ms = get_camera_timeout_ms()
+    timeout_ms = timeout_ms or get_camera_timeout_ms()
     capture = cv2.VideoCapture()
     capture.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, timeout_ms)
     capture.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, timeout_ms)
@@ -835,6 +884,15 @@ def get_camera_timeout_ms() -> int:
         return int(timeout)
     except ValueError:
         return 5000
+
+
+def get_camera_scan_timeout_ms() -> int:
+    timeout = os.getenv("CAMERA_SCAN_TIMEOUT_MS", "1200")
+
+    try:
+        return max(250, int(timeout))
+    except ValueError:
+        return 1200
 
 
 def normalize_face(face: dict) -> dict:

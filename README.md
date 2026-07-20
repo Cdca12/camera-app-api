@@ -26,6 +26,7 @@ Para correr la API en una PC remota del negocio como `CameraAppAPI.exe`, revisa
 - `POST /configuration/stores`
 - `PUT /configuration/stores/{store_id}/primary-camera`
 - `POST /camera-config`
+- `POST /camera-channels/scan`
 - `POST /analyze-frame`
 - `GET /camera-frame`
 - `POST /analyze-camera-frame`
@@ -135,6 +136,25 @@ Content-Type: application/json
 
 La contraseña se usa solo para construir la URL RTSP dentro del backend. No se
 regresa en la respuesta del endpoint.
+
+Con una configuración RTSP activa, el frontend puede descubrir canales del NVR
+sin pedirle al administrador que los adivine:
+
+```http
+POST /camera-channels/scan
+Content-Type: application/json
+```
+
+```json
+{
+  "max_channels": 16
+}
+```
+
+La búsqueda prueba los canales Hikvision habituales `101`, `201`, `301`, etc.
+Cada canal responde únicamente si puede entregar un frame. El límite máximo es
+64 canales y el tiempo por intento se controla con `CAMERA_SCAN_TIMEOUT_MS`
+(por defecto 1200 ms).
 
 El frontend puede seguir usando:
 
