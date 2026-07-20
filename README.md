@@ -22,6 +22,9 @@ Para correr la API en una PC remota del negocio como `CameraAppAPI.exe`, revisa
 - `GET /stores`
 - `GET /dashboard/summary`
 - `GET /dashboard/daily`
+- `GET /configuration`
+- `POST /configuration/stores`
+- `PUT /configuration/stores/{store_id}/primary-camera`
 - `POST /camera-config`
 - `POST /analyze-frame`
 - `GET /camera-frame`
@@ -70,6 +73,36 @@ GET /dashboard/daily?store_id=1&date_from=2026-07-01&date_to=2026-07-19
 El histórico regresa los días del más reciente al más antiguo e incluye
 conteo, variación contra el día anterior, hora pico, género predominante y
 rango de edad predominante. El rango máximo permitido es de 366 días.
+
+## Configuración local
+
+`GET /configuration` devuelve las tiendas, su cámara principal y el estado del
+servicio local. Para crear una tienda:
+
+```json
+POST /configuration/stores
+{
+  "name": "Maja Nueva Sucursal",
+  "code": "maja-nueva-sucursal",
+  "timezone": "America/Mazatlan"
+}
+```
+
+Para guardar la cámara principal de una tienda:
+
+```json
+PUT /configuration/stores/1/primary-camera
+{
+  "name": "Entrada principal",
+  "channel": "101",
+  "location": "Acceso principal",
+  "is_active": true
+}
+```
+
+Estas configuraciones se guardan en SQLite. Las credenciales RTSP no se
+guardan en la base: se aplican únicamente en memoria mediante `POST
+/camera-config`.
 
 Si no se envían fechas, el endpoint utiliza el día actual. Los nombres técnicos
 de tablas, columnas y valores internos están en inglés; las etiquetas listas

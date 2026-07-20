@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from fastapi import FastAPI, File, UploadFile, HTTPException, Query, Response
+from fastapi import FastAPI, File, UploadFile, HTTPException, Query, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from deepface import DeepFace
 from pydantic import BaseModel
@@ -17,6 +17,7 @@ from typing import Optional
 import time
 
 from dashboard import get_dashboard_daily, get_dashboard_summary, list_stores
+from configuration import create_store, get_configuration, save_primary_camera
 from database import initialize_database
 
 cv2.setLogLevel(0)
@@ -49,6 +50,19 @@ class CameraConfig(BaseModel):
     password: str
     port: str = "554"
     path_template: str = "/Streaming/Channels/{channel}"
+
+
+class StoreSettings(BaseModel):
+    name: str
+    code: str
+    timezone: str = "America/Mazatlan"
+
+
+class PrimaryCameraSettings(BaseModel):
+    name: str
+    channel: str
+    location: str = "Entrada principal"
+    is_active: bool = True
 
 
 runtime_camera_config: dict[str, str] = {}
@@ -108,6 +122,7 @@ def root():
         "service": "camera-app-api",
         "health": "/health",
         "stores": "/stores",
+        "configuration": "/configuration",
         "dashboard_daily": "/dashboard/daily",
         "dashboard_summary": "/dashboard/summary",
         "camera_config": "/camera-config",
@@ -122,6 +137,30 @@ def root():
 @app.get("/stores")
 def stores():
     return {"stores": list_stores()}
+
+
+@app.get("/configuration")
+def configuration():
+    return get_configuration(runtime_camera_config)
+
+
+@app.post("/configuration/stores", status_code=status.HTTP_201_CREATED)
+def configuration_store(store: StoreSettings):
+    return create_store(store.name, store.code, store.timezone)
+
+
+@app.put("/configuration/stores/{store_id}/primary-camera")
+def configuration_primary_camera(
+    store_id: int,
+    camera: PrimaryCameraSettings,
+):
+    return save_primary_camera(
+        store_id,
+        camera.name,
+        camera.channel,
+        camera.location,
+        camera.is_active,
+    )
 
 
 @app.get("/dashboard/summary")
