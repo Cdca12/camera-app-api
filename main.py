@@ -11,6 +11,7 @@ import numpy as np
 import cv2
 import io
 import os
+import multiprocessing
 from contextlib import contextmanager
 from urllib.parse import quote
 from typing import Optional
@@ -307,14 +308,18 @@ def scan_camera_channels(request: CameraChannelScanRequest):
         scanned_channels = camera_number
 
         try:
-            frame = capture_camera_frame(
-                channel,
-                timeout_ms=get_camera_scan_timeout_ms(),
+            camera_source = get_camera_source(channel)
+            dimensions = probe_camera_source(
+                camera_source,
+                get_camera_scan_timeout_ms(),
             )
         except HTTPException:
             continue
 
-        height, width = frame.shape[:2]
+        if dimensions is None:
+            continue
+
+        width, height = dimensions
         discovered_cameras.append(
             {
                 "name": f"Cámara {camera_number}",
@@ -528,6 +533,54 @@ def capture_camera_frame(
             )
 
         return frame
+    finally:
+        capture.release()
+
+
+def probe_camera_source(camera_source: str | int, timeout_ms: int) -> tuple[int, int] | None:
+    context = multiprocessing.get_context("fork")
+    result_queue = context.Queue(maxsize=1)
+    process = context.Process(
+        target=probe_camera_source_worker,
+        args=(camera_source, timeout_ms, result_queue),
+        daemon=True,
+    )
+    process.start()
+    process.join(timeout_ms / 1000)
+
+    if process.is_alive():
+        process.terminate()
+        process.join()
+        result_queue.close()
+        return None
+
+    try:
+        result = result_queue.get(timeout=0.1)
+    except Exception:
+        result = None
+    finally:
+        result_queue.close()
+
+    return result
+
+
+def probe_camera_source_worker(
+    camera_source: str | int,
+    timeout_ms: int,
+    result_queue,
+) -> None:
+    capture = cv2.VideoCapture()
+    capture.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, timeout_ms)
+    capture.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, timeout_ms)
+
+    try:
+        with suppress_stderr():
+            is_opened = capture.open(camera_source)
+            success, frame = capture.read() if is_opened else (False, None)
+
+        if success and frame is not None:
+            height, width = frame.shape[:2]
+            result_queue.put((width, height))
     finally:
         capture.release()
 
