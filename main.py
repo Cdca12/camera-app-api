@@ -16,7 +16,7 @@ from urllib.parse import quote
 from typing import Optional
 import time
 
-from dashboard import get_dashboard_summary, list_stores
+from dashboard import get_dashboard_daily, get_dashboard_summary, list_stores
 from database import initialize_database
 
 cv2.setLogLevel(0)
@@ -108,6 +108,7 @@ def root():
         "service": "camera-app-api",
         "health": "/health",
         "stores": "/stores",
+        "dashboard_daily": "/dashboard/daily",
         "dashboard_summary": "/dashboard/summary",
         "camera_config": "/camera-config",
         "analyze_frame": "/analyze-frame",
@@ -130,6 +131,15 @@ def dashboard_summary(
     date_to: date = Query(default_factory=date.today),
 ):
     return get_dashboard_summary(store_id, date_from, date_to)
+
+
+@app.get("/dashboard/daily")
+def dashboard_daily(
+    store_id: int = Query(..., gt=0),
+    date_from: date = Query(default_factory=date.today),
+    date_to: date = Query(default_factory=date.today),
+):
+    return get_dashboard_daily(store_id, date_from, date_to)
 
 
 @app.post("/camera-config")

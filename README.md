@@ -21,6 +21,7 @@ Para correr la API en una PC remota del negocio como `CameraAppAPI.exe`, revisa
 - `GET /health`
 - `GET /stores`
 - `GET /dashboard/summary`
+- `GET /dashboard/daily`
 - `POST /camera-config`
 - `POST /analyze-frame`
 - `GET /camera-frame`
@@ -59,6 +60,16 @@ Para obtener el resumen del dashboard:
 ```http
 GET /dashboard/summary?store_id=1&date_from=2026-07-19&date_to=2026-07-19
 ```
+
+Para obtener el histórico diario de la página de detalle:
+
+```http
+GET /dashboard/daily?store_id=1&date_from=2026-07-01&date_to=2026-07-19
+```
+
+El histórico regresa los días del más reciente al más antiguo e incluye
+conteo, variación contra el día anterior, hora pico, género predominante y
+rango de edad predominante. El rango máximo permitido es de 366 días.
 
 Si no se envían fechas, el endpoint utiliza el día actual. Los nombres técnicos
 de tablas, columnas y valores internos están en inglés; las etiquetas listas
