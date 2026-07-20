@@ -169,8 +169,9 @@ def dashboard_summary(
     store_id: int = Query(..., gt=0),
     date_from: date = Query(default_factory=date.today),
     date_to: date = Query(default_factory=date.today),
+    data_source: str = Query("all"),
 ):
-    return get_dashboard_summary(store_id, date_from, date_to)
+    return get_dashboard_summary(store_id, date_from, date_to, data_source)
 
 
 @app.get("/dashboard/daily")
@@ -178,8 +179,9 @@ def dashboard_daily(
     store_id: int = Query(..., gt=0),
     date_from: date = Query(default_factory=date.today),
     date_to: date = Query(default_factory=date.today),
+    data_source: str = Query("all"),
 ):
-    return get_dashboard_daily(store_id, date_from, date_to)
+    return get_dashboard_daily(store_id, date_from, date_to, data_source)
 
 
 @app.post("/camera-config")

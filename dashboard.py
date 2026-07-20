@@ -42,7 +42,9 @@ def get_dashboard_summary(
     store_id: int,
     date_from: date,
     date_to: date,
+    data_source: str = "all",
 ) -> dict:
+    _validate_data_source(data_source)
     if date_from > date_to:
         raise HTTPException(
             status_code=422,
@@ -73,12 +75,14 @@ def get_dashboard_summary(
             store_id,
             selected_start,
             selected_end,
+            data_source,
         )
         previous_count = _count_entries(
             connection,
             store_id,
             previous_start,
             previous_end,
+            data_source,
         )
         hourly_traffic = _hourly_traffic(
             connection,
@@ -87,6 +91,7 @@ def get_dashboard_summary(
             selected_end,
             previous_start,
             previous_end,
+            data_source,
         )
         gender_distribution = _distribution(
             connection,
@@ -95,6 +100,7 @@ def get_dashboard_summary(
             selected_end,
             "gender",
             GENDER_LABELS,
+            data_source,
         )
         age_distribution = _distribution(
             connection,
@@ -103,6 +109,7 @@ def get_dashboard_summary(
             selected_end,
             "age_bucket",
             AGE_BUCKET_LABELS,
+            data_source,
         )
 
     peak = max(hourly_traffic, key=lambda item: item["current_count"])
@@ -138,8 +145,10 @@ def get_dashboard_daily(
     store_id: int,
     date_from: date,
     date_to: date,
+    data_source: str = "all",
 ) -> dict:
     _validate_date_range(date_from, date_to, maximum_days=366)
+    _validate_data_source(data_source)
     selected_start = datetime.combine(date_from, time.min)
     selected_end = datetime.combine(date_to + timedelta(days=1), time.min)
     query_start = selected_start - timedelta(days=1)
@@ -162,12 +171,14 @@ def get_dashboard_daily(
             store_id,
             query_start,
             selected_end,
+            data_source,
         )
         peak_hours = _daily_peak_hours(
             connection,
             store_id,
             selected_start,
             selected_end,
+            data_source,
         )
         dominant_genders = _daily_dominant_values(
             connection,
@@ -175,6 +186,7 @@ def get_dashboard_daily(
             selected_start,
             selected_end,
             "gender",
+            data_source,
         )
         dominant_ages = _daily_dominant_values(
             connection,
@@ -182,6 +194,7 @@ def get_dashboard_daily(
             selected_start,
             selected_end,
             "age_bucket",
+            data_source,
         )
 
     days = []
@@ -250,11 +263,19 @@ def _validate_date_range(
         )
 
 
+def _validate_data_source(data_source: str) -> None:
+    if data_source not in {"all", "simulated", "captured"}:
+        raise HTTPException(
+            status_code=422,
+            detail="data_source debe ser all, simulated o captured",
+        )
+
 def _daily_counts(
     connection,
     store_id: int,
     start: datetime,
     end: datetime,
+    data_source: str,
 ) -> dict[str, int]:
     rows = connection.execute(
         """
@@ -264,9 +285,10 @@ def _daily_counts(
           AND counting_direction = 'entry'
           AND captured_at >= ?
           AND captured_at < ?
+          AND (? = 'all' OR data_source = ?)
         GROUP BY event_date
         """,
-        (store_id, _timestamp(start), _timestamp(end)),
+        (store_id, _timestamp(start), _timestamp(end), data_source, data_source),
     ).fetchall()
     return {row["event_date"]: int(row["total"]) for row in rows}
 
@@ -276,6 +298,7 @@ def _daily_peak_hours(
     store_id: int,
     start: datetime,
     end: datetime,
+    data_source: str,
 ) -> dict[str, dict]:
     rows = connection.execute(
         """
@@ -287,10 +310,11 @@ def _daily_peak_hours(
           AND counting_direction = 'entry'
           AND captured_at >= ?
           AND captured_at < ?
+          AND (? = 'all' OR data_source = ?)
         GROUP BY event_date, value
         ORDER BY event_date, total DESC, value
         """,
-        (store_id, _timestamp(start), _timestamp(end)),
+        (store_id, _timestamp(start), _timestamp(end), data_source, data_source),
     ).fetchall()
     return _first_value_per_day(rows)
 
@@ -301,6 +325,7 @@ def _daily_dominant_values(
     start: datetime,
     end: datetime,
     field: str,
+    data_source: str,
 ) -> dict[str, dict]:
     rows = connection.execute(
         f"""
@@ -312,10 +337,11 @@ def _daily_dominant_values(
           AND counting_direction = 'entry'
           AND captured_at >= ?
           AND captured_at < ?
+          AND (? = 'all' OR data_source = ?)
         GROUP BY event_date, {field}
         ORDER BY event_date, total DESC, value
         """,
-        (store_id, _timestamp(start), _timestamp(end)),
+        (store_id, _timestamp(start), _timestamp(end), data_source, data_source),
     ).fetchall()
     return _first_value_per_day(rows)
 
@@ -350,7 +376,13 @@ def _daily_distribution_value(
     }
 
 
-def _count_entries(connection, store_id: int, start: datetime, end: datetime) -> int:
+def _count_entries(
+    connection,
+    store_id: int,
+    start: datetime,
+    end: datetime,
+    data_source: str,
+) -> int:
     row = connection.execute(
         """
         SELECT COUNT(*) AS total
@@ -359,8 +391,9 @@ def _count_entries(connection, store_id: int, start: datetime, end: datetime) ->
           AND counting_direction = 'entry'
           AND captured_at >= ?
           AND captured_at < ?
+          AND (? = 'all' OR data_source = ?)
         """,
-        (store_id, _timestamp(start), _timestamp(end)),
+        (store_id, _timestamp(start), _timestamp(end), data_source, data_source),
     ).fetchone()
     return int(row["total"])
 
@@ -372,9 +405,14 @@ def _hourly_traffic(
     current_end: datetime,
     previous_start: datetime,
     previous_end: datetime,
+    data_source: str,
 ) -> list[dict]:
-    current = _counts_by_hour(connection, store_id, current_start, current_end)
-    previous = _counts_by_hour(connection, store_id, previous_start, previous_end)
+    current = _counts_by_hour(
+        connection, store_id, current_start, current_end, data_source
+    )
+    previous = _counts_by_hour(
+        connection, store_id, previous_start, previous_end, data_source
+    )
 
     return [
         {
@@ -391,6 +429,7 @@ def _counts_by_hour(
     store_id: int,
     start: datetime,
     end: datetime,
+    data_source: str,
 ) -> dict[int, int]:
     rows = connection.execute(
         """
@@ -401,10 +440,11 @@ def _counts_by_hour(
           AND counting_direction = 'entry'
           AND captured_at >= ?
           AND captured_at < ?
+          AND (? = 'all' OR data_source = ?)
         GROUP BY hour
         ORDER BY hour
         """,
-        (store_id, _timestamp(start), _timestamp(end)),
+        (store_id, _timestamp(start), _timestamp(end), data_source, data_source),
     ).fetchall()
     return {int(row["hour"]): int(row["total"]) for row in rows}
 
@@ -416,6 +456,7 @@ def _distribution(
     end: datetime,
     field: str,
     labels: dict[str, str],
+    data_source: str,
 ) -> list[dict]:
     rows = connection.execute(
         f"""
@@ -425,9 +466,10 @@ def _distribution(
           AND counting_direction = 'entry'
           AND captured_at >= ?
           AND captured_at < ?
+          AND (? = 'all' OR data_source = ?)
         GROUP BY {field}
         """,
-        (store_id, _timestamp(start), _timestamp(end)),
+        (store_id, _timestamp(start), _timestamp(end), data_source, data_source),
     ).fetchall()
     counts = {row["key"]: int(row["total"]) for row in rows}
     total = sum(counts.values())
