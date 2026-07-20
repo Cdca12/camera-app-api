@@ -1,0 +1,137 @@
+from __future__ import annotations
+
+from datetime import datetime
+from uuid import uuid4
+
+from fastapi import HTTPException
+
+from database import database_connection
+
+
+def record_captured_faces(
+    store_id: int,
+    camera_name: str | None,
+    channel: str | None,
+    faces: list[dict],
+) -> list[dict]:
+    if not faces:
+        return []
+
+    normalized_channel = (channel or "device-local").strip() or "device-local"
+    normalized_name = (camera_name or "Cámara del dispositivo").strip()
+    captured_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    with database_connection() as connection:
+        store = connection.execute(
+            "SELECT id FROM stores WHERE id = ? AND is_active = 1",
+            (store_id,),
+        ).fetchone()
+        if store is None:
+            raise HTTPException(status_code=404, detail="Store not found")
+
+        camera = connection.execute(
+            """
+            SELECT id
+            FROM cameras
+            WHERE store_id = ? AND channel = ?
+            """,
+            (store_id, normalized_channel),
+        ).fetchone()
+
+        if camera is None:
+            cursor = connection.execute(
+                """
+                INSERT INTO cameras (store_id, name, channel, location, is_active)
+                VALUES (?, ?, ?, ?, 1)
+                """,
+                (
+                    store_id,
+                    normalized_name,
+                    normalized_channel,
+                    "Prueba local" if normalized_channel == "device-local" else "Entrada principal",
+                ),
+            )
+            camera_id = cursor.lastrowid
+        else:
+            camera_id = camera["id"]
+
+        events = []
+        for face in faces:
+            events.append(
+                {
+                    "event_uuid": str(uuid4()),
+                    "gender": normalize_gender(face.get("gender")),
+                    "age_estimate": normalize_age(face.get("age")),
+                    "age_bucket": normalize_age_bucket(face.get("age_bucket")),
+                }
+            )
+
+        connection.executemany(
+            """
+            INSERT INTO visitor_events (
+                store_id,
+                camera_id,
+                event_uuid,
+                captured_at,
+                gender,
+                age_estimate,
+                age_bucket,
+                confidence,
+                data_source,
+                counting_direction
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 'captured', 'entry')
+            """,
+            [
+                (
+                    store_id,
+                    camera_id,
+                    event["event_uuid"],
+                    captured_at,
+                    event["gender"],
+                    event["age_estimate"],
+                    event["age_bucket"],
+                )
+                for event in events
+            ],
+        )
+        connection.commit()
+
+    return [
+        {
+            "event_uuid": event["event_uuid"],
+            "captured_at": captured_at,
+            "store_id": store_id,
+            "camera_id": camera_id,
+        }
+        for event in events
+    ]
+
+
+def normalize_gender(value: object) -> str:
+    normalized = str(value or "").lower()
+    if normalized in {"female", "woman", "feminine"}:
+        return "female"
+    if normalized in {"male", "man", "masculine"}:
+        return "male"
+    return "unknown"
+
+
+def normalize_age(value: object) -> int | None:
+    try:
+        return int(round(float(value)))
+    except (TypeError, ValueError):
+        return None
+
+
+def normalize_age_bucket(value: object) -> str:
+    normalized = str(value or "unknown")
+    valid_buckets = {
+        "under_18",
+        "18_24",
+        "25_34",
+        "35_44",
+        "45_54",
+        "55_plus",
+    }
+    return normalized if normalized in valid_buckets else "unknown"

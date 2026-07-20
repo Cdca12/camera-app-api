@@ -18,6 +18,7 @@ import time
 
 from dashboard import get_dashboard_daily, get_dashboard_summary, list_stores
 from configuration import create_store, get_configuration, save_primary_camera
+from captured_events import record_captured_faces
 from database import initialize_database
 
 cv2.setLogLevel(0)
@@ -268,6 +269,7 @@ def analyze_camera_frame(
 def watch_camera_frame(
     channel: Optional[str] = None,
     camera_name: Optional[str] = None,
+    store_id: int = Query(1, gt=0),
 ):
     try:
         frame = capture_camera_frame(channel)
@@ -278,6 +280,7 @@ def watch_camera_frame(
             source="Red",
             camera_name=camera_name,
             channel=channel,
+            store_id=store_id,
         )
 
     except HTTPException:
@@ -293,7 +296,10 @@ def watch_camera_frame(
 
 
 @app.post("/watch-uploaded-frame")
-async def watch_uploaded_frame(file: UploadFile = File(...)):
+async def watch_uploaded_frame(
+    file: UploadFile = File(...),
+    store_id: int = Query(1, gt=0),
+):
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(
             status_code=400,
@@ -318,6 +324,7 @@ async def watch_uploaded_frame(file: UploadFile = File(...)):
             source="Dispositivo",
             camera_name="Dispositivo",
             channel=None,
+            store_id=store_id,
         )
 
     except Exception as error:
@@ -596,6 +603,7 @@ def watch_frame_for_new_faces(
     source: str,
     camera_name: Optional[str],
     channel: Optional[str],
+    store_id: int,
 ) -> dict:
     detected_faces = detect_light_faces(frame)
 
@@ -634,11 +642,19 @@ def watch_frame_for_new_faces(
             analyzed_face["region"] = detected_face["region"]
             analyzed_faces.append(analyzed_face)
 
+    recorded_events = record_captured_faces(
+        store_id,
+        camera_name,
+        channel,
+        analyzed_faces,
+    )
+
     return {
         "success": True,
         "has_new_faces": bool(analyzed_faces),
         "people_count": len(analyzed_faces),
         "faces": analyzed_faces,
+        "recorded_events": recorded_events,
     }
 
 

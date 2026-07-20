@@ -85,6 +85,8 @@ def initialize_database() -> None:
                         )
                     ),
                 confidence REAL,
+                data_source TEXT NOT NULL DEFAULT 'simulated'
+                    CHECK (data_source IN ('simulated', 'captured')),
                 counting_direction TEXT NOT NULL DEFAULT 'entry'
                     CHECK (counting_direction IN ('entry', 'exit', 'unknown')),
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -96,6 +98,23 @@ def initialize_database() -> None:
                 ON visitor_events (store_id, captured_at);
             CREATE INDEX IF NOT EXISTS idx_visitor_events_camera_captured_at
                 ON visitor_events (camera_id, captured_at);
+            """
+        )
+        event_columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(visitor_events)").fetchall()
+        }
+        if "data_source" not in event_columns:
+            connection.execute(
+                """
+                ALTER TABLE visitor_events
+                ADD COLUMN data_source TEXT NOT NULL DEFAULT 'simulated'
+                """
+            )
+        connection.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_visitor_events_store_source_captured_at
+            ON visitor_events (store_id, data_source, captured_at)
             """
         )
         connection.commit()

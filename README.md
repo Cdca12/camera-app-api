@@ -231,6 +231,12 @@ Si detecta una cara nueva, entonces corre DeepFace para edad/género y responde:
 }
 ```
 
+Cada cara nueva detectada por `POST /watch-camera-frame` o
+`POST /watch-uploaded-frame` también se guarda en SQLite como un evento con
+`data_source = captured`. Por defecto se asocia a la tienda `store_id=1`; para
+pruebas con otra tienda se puede enviar `?store_id=<id>`. Las caras ya vistas
+durante el TTL del cache no se vuelven a registrar.
+
 Variables opcionales:
 
 ```env
