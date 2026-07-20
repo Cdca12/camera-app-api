@@ -165,10 +165,11 @@ Content-Type: application/json
 }
 ```
 
-La búsqueda prueba los canales Hikvision habituales `101`, `201`, `301`, etc.
-Cada canal responde únicamente si puede entregar un frame. El límite máximo es
-64 canales y el tiempo por intento se controla con `CAMERA_SCAN_TIMEOUT_MS`
-(por defecto 1200 ms).
+La búsqueda prueba los primeros ocho canales Hikvision habituales `101`, `201`,
+`301`, etc. Cada canal responde únicamente si puede entregar un frame. El
+escaneo se detiene alrededor de los cuatro segundos para mantener una respuesta
+ágil; el tiempo por intento se controla con `CAMERA_SCAN_TIMEOUT_MS` (por
+defecto 450 ms).
 
 El frontend puede seguir usando:
 

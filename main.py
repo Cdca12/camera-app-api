@@ -286,8 +286,10 @@ def test_camera_config(config: CameraConfig):
 
 @app.post("/camera-channels/scan")
 def scan_camera_channels(request: CameraChannelScanRequest):
-    max_channels = max(1, min(request.max_channels, 64))
+    max_channels = max(1, min(request.max_channels, 8))
     discovered_cameras = []
+    scanned_channels = 0
+    scan_deadline = time.monotonic() + 4
 
     try:
         get_camera_source("101")
@@ -298,7 +300,11 @@ def scan_camera_channels(request: CameraChannelScanRequest):
         ) from error
 
     for camera_number in range(1, max_channels + 1):
+        if time.monotonic() >= scan_deadline:
+            break
+
         channel = f"{camera_number}01"
+        scanned_channels = camera_number
 
         try:
             frame = capture_camera_frame(
@@ -320,7 +326,7 @@ def scan_camera_channels(request: CameraChannelScanRequest):
 
     return {
         "success": True,
-        "scanned_channels": max_channels,
+        "scanned_channels": scanned_channels,
         "cameras": discovered_cameras,
     }
 
@@ -971,12 +977,12 @@ def get_camera_timeout_ms() -> int:
 
 
 def get_camera_scan_timeout_ms() -> int:
-    timeout = os.getenv("CAMERA_SCAN_TIMEOUT_MS", "1200")
+    timeout = os.getenv("CAMERA_SCAN_TIMEOUT_MS", "450")
 
     try:
         return max(250, int(timeout))
     except ValueError:
-        return 1200
+        return 450
 
 
 def normalize_face(face: dict) -> dict:
