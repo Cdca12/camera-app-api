@@ -19,12 +19,56 @@ Para correr la API en una PC remota del negocio como `CameraAppAPI.exe`, revisa
 ## Endpoints
 
 - `GET /health`
+- `GET /stores`
+- `GET /dashboard/summary`
 - `POST /camera-config`
 - `POST /analyze-frame`
 - `GET /camera-frame`
 - `POST /analyze-camera-frame`
 - `POST /watch-camera-frame`
 - `POST /watch-uploaded-frame`
+
+## Base de datos local
+
+El dashboard usa SQLite, incluido con Python, por lo que no requiere instalar ni
+ejecutar un servidor de base de datos adicional. El archivo local se genera en
+`data/camera_app.db` y no se guarda en Git.
+
+Para crear las tablas y cargar 30 días de datos simulados:
+
+```bash
+source .venv/bin/activate
+python scripts/seed_database.py
+```
+
+La carga reemplaza los datos simulados anteriores para que el entorno de
+desarrollo siempre sea reproducible. Puedes cambiar el periodo:
+
+```bash
+python scripts/seed_database.py --days 60
+```
+
+Para consultar las tiendas:
+
+```http
+GET /stores
+```
+
+Para obtener el resumen del dashboard:
+
+```http
+GET /dashboard/summary?store_id=1&date_from=2026-07-19&date_to=2026-07-19
+```
+
+Si no se envían fechas, el endpoint utiliza el día actual. Los nombres técnicos
+de tablas, columnas y valores internos están en inglés; las etiquetas listas
+para presentar en la interfaz se devuelven en español.
+
+Opcionalmente, la ubicación de la base puede configurarse con:
+
+```env
+CAMERA_APP_DB_PATH=/ruta/local/camera_app.db
+```
 
 ## Cámara de vigilancia
 

@@ -53,3 +53,7 @@ models/
 # Temporary files
 tmp/
 temp/
+
+# Local SQLite databases
+data/*.db
+data/*.db-*

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from fastapi import FastAPI, File, UploadFile, HTTPException, Response
+from datetime import date
+
+from fastapi import FastAPI, File, UploadFile, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from deepface import DeepFace
 from pydantic import BaseModel
@@ -13,6 +15,9 @@ from contextlib import contextmanager
 from urllib.parse import quote
 from typing import Optional
 import time
+
+from dashboard import get_dashboard_summary, list_stores
+from database import initialize_database
 
 cv2.setLogLevel(0)
 
@@ -35,6 +40,7 @@ def load_local_env() -> None:
 
 
 load_local_env()
+initialize_database()
 
 
 class CameraConfig(BaseModel):
@@ -101,6 +107,8 @@ def root():
     return {
         "service": "camera-app-api",
         "health": "/health",
+        "stores": "/stores",
+        "dashboard_summary": "/dashboard/summary",
         "camera_config": "/camera-config",
         "analyze_frame": "/analyze-frame",
         "camera_frame": "/camera-frame",
@@ -108,6 +116,20 @@ def root():
         "watch_camera_frame": "/watch-camera-frame",
         "watch_uploaded_frame": "/watch-uploaded-frame",
     }
+
+
+@app.get("/stores")
+def stores():
+    return {"stores": list_stores()}
+
+
+@app.get("/dashboard/summary")
+def dashboard_summary(
+    store_id: int = Query(..., gt=0),
+    date_from: date = Query(default_factory=date.today),
+    date_to: date = Query(default_factory=date.today),
+):
+    return get_dashboard_summary(store_id, date_from, date_to)
 
 
 @app.post("/camera-config")
