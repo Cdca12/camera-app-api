@@ -104,7 +104,7 @@ def seed_database(days: int, database_path: Path | None = None) -> int:
                         age_bucket, age_range = _choose_age(random_generator)
                         gender = random_generator.choices(
                             ["female", "male", "unknown"],
-                            weights=[0.54, 0.44, 0.02],
+                            weights=[0.38, 0.60, 0.02],
                             k=1,
                         )[0]
                         event_key = (
