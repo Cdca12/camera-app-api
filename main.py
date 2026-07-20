@@ -19,7 +19,11 @@ import time
 from dashboard import get_dashboard_daily, get_dashboard_summary, list_stores
 from configuration import create_store, get_configuration, save_primary_camera
 from captured_events import record_captured_faces
-from database import initialize_database
+from database import (
+    get_test_database_path,
+    initialize_operational_database,
+    initialize_test_database,
+)
 
 cv2.setLogLevel(0)
 
@@ -42,7 +46,8 @@ def load_local_env() -> None:
 
 
 load_local_env()
-initialize_database()
+initialize_operational_database()
+initialize_test_database()
 
 
 class CameraConfig(BaseModel):
@@ -71,6 +76,7 @@ class PrimaryCameraSettings(BaseModel):
 
 
 runtime_camera_config: dict[str, str] = {}
+test_runtime_camera_config: dict[str, str] = {}
 face_cache: dict[str, list[dict]] = {}
 face_detector = cv2.CascadeClassifier(
     cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
@@ -128,8 +134,10 @@ def root():
         "health": "/health",
         "stores": "/stores",
         "configuration": "/configuration",
+        "test_configuration": "/test/configuration",
         "dashboard_daily": "/dashboard/daily",
         "dashboard_summary": "/dashboard/summary",
+        "test_dashboard_summary": "/test/dashboard/summary",
         "camera_config": "/camera-config",
         "camera_channel_scan": "/camera-channels/scan",
         "analyze_frame": "/analyze-frame",
@@ -145,14 +153,34 @@ def stores():
     return {"stores": list_stores()}
 
 
+@app.get("/test/stores")
+def test_stores():
+    return {"stores": list_stores(get_test_database_path())}
+
+
 @app.get("/configuration")
 def configuration():
     return get_configuration(runtime_camera_config)
 
 
+@app.get("/test/configuration")
+def test_configuration():
+    return get_configuration(test_runtime_camera_config, get_test_database_path())
+
+
 @app.post("/configuration/stores", status_code=status.HTTP_201_CREATED)
 def configuration_store(store: StoreSettings):
     return create_store(store.name, store.code, store.timezone)
+
+
+@app.post("/test/configuration/stores", status_code=status.HTTP_201_CREATED)
+def test_configuration_store(store: StoreSettings):
+    return create_store(
+        store.name,
+        store.code,
+        store.timezone,
+        get_test_database_path(),
+    )
 
 
 @app.put("/configuration/stores/{store_id}/primary-camera")
@@ -166,6 +194,21 @@ def configuration_primary_camera(
         camera.channel,
         camera.location,
         camera.is_active,
+    )
+
+
+@app.put("/test/configuration/stores/{store_id}/primary-camera")
+def test_configuration_primary_camera(
+    store_id: int,
+    camera: PrimaryCameraSettings,
+):
+    return save_primary_camera(
+        store_id,
+        camera.name,
+        camera.channel,
+        camera.location,
+        camera.is_active,
+        get_test_database_path(),
     )
 
 
@@ -189,6 +232,36 @@ def dashboard_daily(
     return get_dashboard_daily(store_id, date_from, date_to, data_source)
 
 
+@app.get("/test/dashboard/summary")
+def test_dashboard_summary(
+    store_id: int = Query(..., gt=0),
+    date_from: date = Query(default_factory=date.today),
+    date_to: date = Query(default_factory=date.today),
+):
+    return get_dashboard_summary(
+        store_id,
+        date_from,
+        date_to,
+        "simulated",
+        get_test_database_path(),
+    )
+
+
+@app.get("/test/dashboard/daily")
+def test_dashboard_daily(
+    store_id: int = Query(..., gt=0),
+    date_from: date = Query(default_factory=date.today),
+    date_to: date = Query(default_factory=date.today),
+):
+    return get_dashboard_daily(
+        store_id,
+        date_from,
+        date_to,
+        "simulated",
+        get_test_database_path(),
+    )
+
+
 @app.post("/camera-config")
 def camera_config(config: CameraConfig):
     global runtime_camera_config
@@ -197,6 +270,17 @@ def camera_config(config: CameraConfig):
     return {
         "success": True,
         "config": get_public_camera_config(runtime_camera_config),
+    }
+
+
+@app.post("/test/camera-config")
+def test_camera_config(config: CameraConfig):
+    global test_runtime_camera_config
+    test_runtime_camera_config = normalize_runtime_camera_config(config)
+
+    return {
+        "success": True,
+        "config": get_public_camera_config(test_runtime_camera_config),
     }
 
 

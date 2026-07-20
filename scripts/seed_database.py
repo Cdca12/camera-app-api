@@ -10,7 +10,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from database import database_connection, get_database_path, initialize_database
+from database import (
+    database_connection,
+    get_database_path,
+    get_test_database_path,
+    initialize_database,
+)
 
 
 STORES = [
@@ -45,13 +50,13 @@ AGE_BUCKETS = [
 ]
 
 
-def seed_database(days: int) -> int:
-    initialize_database()
+def seed_database(days: int, database_path: Path | None = None) -> int:
+    initialize_database(database_path)
     random_generator = random.Random(20260719)
     today = date.today()
     first_day = today - timedelta(days=days)
 
-    with database_connection() as connection:
+    with database_connection(database_path) as connection:
         connection.execute("DELETE FROM visitor_events")
         connection.execute("DELETE FROM cameras")
         connection.execute("DELETE FROM stores")
@@ -160,13 +165,19 @@ def main() -> None:
         default=30,
         help="Número de días anteriores, además del día actual (default: 30).",
     )
+    parser.add_argument(
+        "--operational",
+        action="store_true",
+        help="Genera datos en la base operativa en lugar de la base de pruebas.",
+    )
     args = parser.parse_args()
 
     if args.days < 1:
         parser.error("--days debe ser mayor o igual a 1")
 
-    inserted_events = seed_database(args.days)
-    print(f"Database: {get_database_path()}")
+    database_path = get_database_path() if args.operational else get_test_database_path()
+    inserted_events = seed_database(args.days, database_path)
+    print(f"Database: {database_path}")
     print(f"Stores: {len(STORES)}")
     print(f"Visitor events: {inserted_events}")
 

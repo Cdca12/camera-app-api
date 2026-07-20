@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta
+from pathlib import Path
 
 from fastapi import HTTPException
 
@@ -24,8 +25,8 @@ GENDER_LABELS = {
 }
 
 
-def list_stores() -> list[dict]:
-    with database_connection() as connection:
+def list_stores(database_path: Path | None = None) -> list[dict]:
+    with database_connection(database_path) as connection:
         rows = connection.execute(
             """
             SELECT id, name, code, timezone
@@ -43,6 +44,7 @@ def get_dashboard_summary(
     date_from: date,
     date_to: date,
     data_source: str = "all",
+    database_path: Path | None = None,
 ) -> dict:
     _validate_data_source(data_source)
     if date_from > date_to:
@@ -57,7 +59,7 @@ def get_dashboard_summary(
     previous_start = selected_start - period_length
     previous_end = selected_start
 
-    with database_connection() as connection:
+    with database_connection(database_path) as connection:
         store = connection.execute(
             """
             SELECT id, name, code, timezone
@@ -146,6 +148,7 @@ def get_dashboard_daily(
     date_from: date,
     date_to: date,
     data_source: str = "all",
+    database_path: Path | None = None,
 ) -> dict:
     _validate_date_range(date_from, date_to, maximum_days=366)
     _validate_data_source(data_source)
@@ -153,7 +156,7 @@ def get_dashboard_daily(
     selected_end = datetime.combine(date_to + timedelta(days=1), time.min)
     query_start = selected_start - timedelta(days=1)
 
-    with database_connection() as connection:
+    with database_connection(database_path) as connection:
         store = connection.execute(
             """
             SELECT id, name, code, timezone

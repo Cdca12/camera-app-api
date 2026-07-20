@@ -8,7 +8,9 @@ from typing import Iterator
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-DEFAULT_DATABASE_PATH = PROJECT_ROOT / "data" / "camera_app.db"
+DEFAULT_DATABASE_PATH = PROJECT_ROOT / "data" / "camera_app_operational.db"
+DEFAULT_TEST_DATABASE_PATH = PROJECT_ROOT / "data" / "camera_app_test.db"
+LEGACY_DATABASE_PATH = PROJECT_ROOT / "data" / "camera_app.db"
 
 
 def get_database_path() -> Path:
@@ -16,8 +18,17 @@ def get_database_path() -> Path:
     return Path(configured_path).expanduser() if configured_path else DEFAULT_DATABASE_PATH
 
 
-def connect_database() -> sqlite3.Connection:
-    database_path = get_database_path()
+def get_test_database_path() -> Path:
+    configured_path = os.getenv("CAMERA_APP_TEST_DB_PATH")
+    return (
+        Path(configured_path).expanduser()
+        if configured_path
+        else DEFAULT_TEST_DATABASE_PATH
+    )
+
+
+def connect_database(database_path: Path | None = None) -> sqlite3.Connection:
+    database_path = database_path or get_database_path()
     database_path.parent.mkdir(parents=True, exist_ok=True)
 
     connection = sqlite3.connect(database_path)
@@ -27,8 +38,10 @@ def connect_database() -> sqlite3.Connection:
 
 
 @contextmanager
-def database_connection() -> Iterator[sqlite3.Connection]:
-    connection = connect_database()
+def database_connection(
+    database_path: Path | None = None,
+) -> Iterator[sqlite3.Connection]:
+    connection = connect_database(database_path)
 
     try:
         yield connection
@@ -36,8 +49,8 @@ def database_connection() -> Iterator[sqlite3.Connection]:
         connection.close()
 
 
-def initialize_database() -> None:
-    with database_connection() as connection:
+def initialize_database(database_path: Path | None = None) -> None:
+    with database_connection(database_path) as connection:
         connection.executescript(
             """
             CREATE TABLE IF NOT EXISTS stores (
@@ -118,3 +131,101 @@ def initialize_database() -> None:
             """
         )
         connection.commit()
+
+
+def initialize_test_database() -> Path:
+    test_database_path = get_test_database_path()
+    initialize_database(test_database_path)
+
+    with database_connection(test_database_path) as connection:
+        test_event_count = connection.execute(
+            "SELECT COUNT(*) FROM visitor_events"
+        ).fetchone()[0]
+
+    if test_event_count:
+        return test_database_path
+
+    source_paths = [LEGACY_DATABASE_PATH, get_database_path()]
+    for source_path in source_paths:
+        if source_path.exists():
+            _copy_simulated_data(source_path, test_database_path)
+
+            with database_connection(test_database_path) as connection:
+                if connection.execute("SELECT COUNT(*) FROM visitor_events").fetchone()[0]:
+                    break
+
+    return test_database_path
+
+
+def initialize_operational_database() -> Path:
+    operational_database_path = get_database_path()
+    is_new_database = not operational_database_path.exists()
+    initialize_database(operational_database_path)
+
+    if is_new_database and LEGACY_DATABASE_PATH.exists():
+        _copy_captured_data(LEGACY_DATABASE_PATH, operational_database_path)
+
+    return operational_database_path
+
+
+def _copy_simulated_data(source_path: Path, target_path: Path) -> None:
+    _copy_data_by_source(source_path, target_path, "simulated")
+
+
+def _copy_captured_data(source_path: Path, target_path: Path) -> None:
+    _copy_data_by_source(source_path, target_path, "captured")
+
+
+def _copy_data_by_source(
+    source_path: Path,
+    target_path: Path,
+    data_source: str,
+) -> None:
+    with database_connection(source_path) as source_connection:
+        stores = source_connection.execute(
+            "SELECT * FROM stores ORDER BY id"
+        ).fetchall()
+        cameras = source_connection.execute(
+            "SELECT * FROM cameras ORDER BY id"
+        ).fetchall()
+        events = source_connection.execute(
+            """
+            SELECT
+                id, store_id, camera_id, event_uuid, captured_at, gender,
+                age_estimate, age_bucket, confidence, data_source,
+                counting_direction, created_at
+            FROM visitor_events
+            WHERE data_source = ?
+            ORDER BY id
+            """,
+            (data_source,),
+        ).fetchall()
+
+    with database_connection(target_path) as target_connection:
+        target_connection.executemany(
+            """
+            INSERT OR IGNORE INTO stores (
+                id, name, code, timezone, is_active, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            [tuple(store) for store in stores],
+        )
+        target_connection.executemany(
+            """
+            INSERT OR IGNORE INTO cameras (
+                id, store_id, name, channel, location, is_active, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [tuple(camera) for camera in cameras],
+        )
+        target_connection.executemany(
+            """
+            INSERT OR IGNORE INTO visitor_events (
+                id, store_id, camera_id, event_uuid, captured_at, gender,
+                age_estimate, age_bucket, confidence, data_source,
+                counting_direction, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [tuple(event) for event in events],
+        )
+        target_connection.commit()

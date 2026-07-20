@@ -22,10 +22,17 @@ Para correr la API en una PC remota del negocio como `CameraAppAPI.exe`, revisa
 - `GET /stores`
 - `GET /dashboard/summary`
 - `GET /dashboard/daily`
+- `GET /test/stores`
+- `GET /test/dashboard/summary`
+- `GET /test/dashboard/daily`
 - `GET /configuration`
+- `GET /test/configuration`
 - `POST /configuration/stores`
+- `POST /test/configuration/stores`
 - `PUT /configuration/stores/{store_id}/primary-camera`
+- `PUT /test/configuration/stores/{store_id}/primary-camera`
 - `POST /camera-config`
+- `POST /test/camera-config`
 - `POST /camera-channels/scan`
 - `POST /analyze-frame`
 - `GET /camera-frame`
@@ -36,8 +43,10 @@ Para correr la API en una PC remota del negocio como `CameraAppAPI.exe`, revisa
 ## Base de datos local
 
 El dashboard usa SQLite, incluido con Python, por lo que no requiere instalar ni
-ejecutar un servidor de base de datos adicional. El archivo local se genera en
-`data/camera_app.db` y no se guarda en Git.
+ejecutar un servidor de base de datos adicional. La operación real usa
+`data/camera_app_operational.db`; las rutas con prefijo `/test` usan una base independiente
+en `data/camera_app_test.db`. Ninguna lectura ni escritura de `/test` afecta la
+base operativa.
 
 Para crear las tablas y cargar 30 días de datos simulados:
 
@@ -112,8 +121,13 @@ para presentar en la interfaz se devuelven en español.
 Opcionalmente, la ubicación de la base puede configurarse con:
 
 ```env
-CAMERA_APP_DB_PATH=/ruta/local/camera_app.db
+CAMERA_APP_DB_PATH=/ruta/local/camera_app_operational.db
+CAMERA_APP_TEST_DB_PATH=/ruta/local/camera_app_test.db
 ```
+
+Al iniciar la API por primera vez, la base de pruebas se llena con los datos
+simulados existentes. Las detecciones de cámara siempre se guardan únicamente
+en la base operativa.
 
 ## Cámara de vigilancia
 

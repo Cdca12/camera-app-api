@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from pathlib import Path
 
 from fastapi import HTTPException
 
@@ -10,8 +11,11 @@ from database import database_connection
 STORE_CODE_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 
-def get_configuration(runtime_camera_config: dict[str, str]) -> dict:
-    with database_connection() as connection:
+def get_configuration(
+    runtime_camera_config: dict[str, str],
+    database_path: Path | None = None,
+) -> dict:
+    with database_connection(database_path) as connection:
         rows = connection.execute(
             """
             SELECT
@@ -68,7 +72,12 @@ def get_configuration(runtime_camera_config: dict[str, str]) -> dict:
     }
 
 
-def create_store(name: str, code: str, timezone: str) -> dict:
+def create_store(
+    name: str,
+    code: str,
+    timezone: str,
+    database_path: Path | None = None,
+) -> dict:
     normalized_name = name.strip()
     normalized_code = code.strip().lower()
     normalized_timezone = timezone.strip() or "America/Mazatlan"
@@ -83,7 +92,7 @@ def create_store(name: str, code: str, timezone: str) -> dict:
         )
 
     try:
-        with database_connection() as connection:
+        with database_connection(database_path) as connection:
             cursor = connection.execute(
                 """
                 INSERT INTO stores (name, code, timezone)
@@ -112,6 +121,7 @@ def save_primary_camera(
     channel: str,
     location: str,
     is_active: bool,
+    database_path: Path | None = None,
 ) -> dict:
     normalized_name = name.strip()
     normalized_channel = channel.strip()
@@ -123,7 +133,7 @@ def save_primary_camera(
             detail="El nombre y canal de la cámara son obligatorios",
         )
 
-    with database_connection() as connection:
+    with database_connection(database_path) as connection:
         store = connection.execute(
             "SELECT id FROM stores WHERE id = ? AND is_active = 1",
             (store_id,),
