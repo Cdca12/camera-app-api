@@ -217,7 +217,7 @@ def dashboard_summary(
     store_id: int = Query(..., gt=0),
     date_from: date = Query(default_factory=date.today),
     date_to: date = Query(default_factory=date.today),
-    data_source: str = Query("all"),
+    data_source: str = Query("captured"),
 ):
     return get_dashboard_summary(store_id, date_from, date_to, data_source)
 
@@ -227,7 +227,7 @@ def dashboard_daily(
     store_id: int = Query(..., gt=0),
     date_from: date = Query(default_factory=date.today),
     date_to: date = Query(default_factory=date.today),
-    data_source: str = Query("all"),
+    data_source: str = Query("captured"),
 ):
     return get_dashboard_daily(store_id, date_from, date_to, data_source)
 
