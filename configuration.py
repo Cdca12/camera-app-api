@@ -115,6 +115,205 @@ def create_store(
     }
 
 
+def update_store(
+    store_id: int,
+    name: str,
+    code: str,
+    timezone: str,
+    database_path: Path | None = None,
+) -> dict:
+    normalized_name = name.strip()
+    normalized_code = code.strip().lower()
+    normalized_timezone = timezone.strip() or "America/Mazatlan"
+
+    if not normalized_name:
+        raise HTTPException(status_code=422, detail="El nombre de la tienda es obligatorio")
+    if not STORE_CODE_PATTERN.fullmatch(normalized_code):
+        raise HTTPException(
+            status_code=422,
+            detail="El código debe usar minúsculas, números y guiones",
+        )
+
+    try:
+        with database_connection(database_path) as connection:
+            store = connection.execute(
+                "SELECT id FROM stores WHERE id = ? AND is_active = 1",
+                (store_id,),
+            ).fetchone()
+            if store is None:
+                raise HTTPException(status_code=404, detail="Tienda no encontrada")
+
+            connection.execute(
+                """
+                UPDATE stores
+                SET name = ?, code = ?, timezone = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (normalized_name, normalized_code, normalized_timezone, store_id),
+            )
+            connection.commit()
+    except HTTPException:
+        raise
+    except Exception as error:
+        if "UNIQUE constraint failed: stores.code" in str(error):
+            raise HTTPException(status_code=409, detail="Ese código de tienda ya existe")
+        raise
+
+    return {
+        "id": store_id,
+        "name": normalized_name,
+        "code": normalized_code,
+        "timezone": normalized_timezone,
+    }
+
+
+def delete_store(store_id: int, database_path: Path | None = None) -> None:
+    with database_connection(database_path) as connection:
+        cursor = connection.execute(
+            """
+            UPDATE stores
+            SET is_active = 0, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ? AND is_active = 1
+            """,
+            (store_id,),
+        )
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Tienda no encontrada")
+        connection.commit()
+
+
+def list_cameras(store_id: int, database_path: Path | None = None) -> list[dict]:
+    with database_connection(database_path) as connection:
+        _require_active_store(connection, store_id)
+        rows = connection.execute(
+            """
+            SELECT id, store_id, name, channel, location, is_active
+            FROM cameras
+            WHERE store_id = ?
+            ORDER BY id
+            """,
+            (store_id,),
+        ).fetchall()
+    return [_camera_payload(row) for row in rows]
+
+
+def create_camera(
+    store_id: int,
+    name: str,
+    channel: str,
+    location: str = "",
+    is_active: bool = True,
+    database_path: Path | None = None,
+) -> dict:
+    normalized_name, normalized_channel, normalized_location = _normalize_camera_fields(name, channel, location)
+    try:
+        with database_connection(database_path) as connection:
+            _require_active_store(connection, store_id)
+            cursor = connection.execute(
+                """
+                INSERT INTO cameras (store_id, name, channel, location, is_active)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (store_id, normalized_name, normalized_channel, normalized_location, int(is_active)),
+            )
+            connection.commit()
+    except Exception as error:
+        if "UNIQUE constraint failed: cameras.store_id, cameras.channel" in str(error):
+            raise HTTPException(status_code=409, detail="Ya existe una cámara con ese canal en esta tienda")
+        raise
+
+    return {
+        "id": cursor.lastrowid,
+        "store_id": store_id,
+        "name": normalized_name,
+        "channel": normalized_channel,
+        "location": normalized_location,
+        "is_active": is_active,
+    }
+
+
+def update_camera(
+    store_id: int,
+    camera_id: int,
+    name: str,
+    channel: str,
+    location: str = "",
+    is_active: bool = True,
+    database_path: Path | None = None,
+) -> dict:
+    normalized_name, normalized_channel, normalized_location = _normalize_camera_fields(name, channel, location)
+    try:
+        with database_connection(database_path) as connection:
+            _require_active_store(connection, store_id)
+            cursor = connection.execute(
+                """
+                UPDATE cameras
+                SET name = ?, channel = ?, location = ?, is_active = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND store_id = ?
+                """,
+                (normalized_name, normalized_channel, normalized_location, int(is_active), camera_id, store_id),
+            )
+            if cursor.rowcount == 0:
+                raise HTTPException(status_code=404, detail="Cámara no encontrada")
+            connection.commit()
+    except HTTPException:
+        raise
+    except Exception as error:
+        if "UNIQUE constraint failed: cameras.store_id, cameras.channel" in str(error):
+            raise HTTPException(status_code=409, detail="Ya existe una cámara con ese canal en esta tienda")
+        raise
+
+    return {
+        "id": camera_id,
+        "store_id": store_id,
+        "name": normalized_name,
+        "channel": normalized_channel,
+        "location": normalized_location,
+        "is_active": is_active,
+    }
+
+
+def delete_camera(store_id: int, camera_id: int, database_path: Path | None = None) -> None:
+    with database_connection(database_path) as connection:
+        _require_active_store(connection, store_id)
+        cursor = connection.execute(
+            "DELETE FROM cameras WHERE id = ? AND store_id = ?",
+            (camera_id, store_id),
+        )
+        if cursor.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Cámara no encontrada")
+        connection.commit()
+
+
+def _require_active_store(connection, store_id: int) -> None:
+    store = connection.execute(
+        "SELECT id FROM stores WHERE id = ? AND is_active = 1",
+        (store_id,),
+    ).fetchone()
+    if store is None:
+        raise HTTPException(status_code=404, detail="Tienda no encontrada")
+
+
+def _normalize_camera_fields(name: str, channel: str, location: str) -> tuple[str, str, str]:
+    normalized_name = name.strip()
+    normalized_channel = channel.strip()
+    normalized_location = location.strip()
+    if not normalized_name or not normalized_channel:
+        raise HTTPException(status_code=422, detail="El nombre y canal de la cámara son obligatorios")
+    return normalized_name, normalized_channel, normalized_location
+
+
+def _camera_payload(row) -> dict:
+    return {
+        "id": row["id"],
+        "store_id": row["store_id"],
+        "name": row["name"],
+        "channel": row["channel"],
+        "location": row["location"],
+        "is_active": bool(row["is_active"]),
+    }
+
+
 def save_primary_camera(
     store_id: int,
     name: str,

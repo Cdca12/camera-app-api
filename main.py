@@ -18,7 +18,17 @@ from typing import Optional
 import time
 
 from dashboard import get_dashboard_daily, get_dashboard_summary, list_stores
-from configuration import create_store, get_configuration, save_primary_camera
+from configuration import (
+    create_camera,
+    create_store,
+    delete_camera,
+    delete_store,
+    get_configuration,
+    list_cameras,
+    save_primary_camera,
+    update_camera,
+    update_store,
+)
 from captured_events import record_captured_faces
 from database import (
     get_test_database_path,
@@ -67,6 +77,13 @@ class StoreSettings(BaseModel):
     name: str
     code: str
     timezone: str = "America/Mazatlan"
+
+
+class CameraSettings(BaseModel):
+    name: str
+    channel: str
+    location: str = ""
+    is_active: bool = True
 
 
 class PrimaryCameraSettings(BaseModel):
@@ -169,12 +186,14 @@ def test_configuration():
     return get_configuration(test_runtime_camera_config, get_test_database_path())
 
 
-@app.post("/configuration/stores", status_code=status.HTTP_201_CREATED)
+@app.post("/stores", status_code=status.HTTP_201_CREATED)
+@app.post("/configuration/stores", status_code=status.HTTP_201_CREATED, include_in_schema=False)
 def configuration_store(store: StoreSettings):
     return create_store(store.name, store.code, store.timezone)
 
 
-@app.post("/test/configuration/stores", status_code=status.HTTP_201_CREATED)
+@app.post("/test/stores", status_code=status.HTTP_201_CREATED)
+@app.post("/test/configuration/stores", status_code=status.HTTP_201_CREATED, include_in_schema=False)
 def test_configuration_store(store: StoreSettings):
     return create_store(
         store.name,
@@ -182,6 +201,70 @@ def test_configuration_store(store: StoreSettings):
         store.timezone,
         get_test_database_path(),
     )
+
+
+@app.put("/stores/{store_id}")
+def update_operational_store(store_id: int, store: StoreSettings):
+    return update_store(store_id, store.name, store.code, store.timezone)
+
+
+@app.put("/test/stores/{store_id}")
+def update_test_store(store_id: int, store: StoreSettings):
+    return update_store(store_id, store.name, store.code, store.timezone, get_test_database_path())
+
+
+@app.delete("/stores/{store_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_operational_store(store_id: int):
+    delete_store(store_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@app.delete("/test/stores/{store_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_test_store(store_id: int):
+    delete_store(store_id, get_test_database_path())
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@app.get("/stores/{store_id}/cameras")
+def operational_store_cameras(store_id: int):
+    return {"cameras": list_cameras(store_id)}
+
+
+@app.get("/test/stores/{store_id}/cameras")
+def test_store_cameras(store_id: int):
+    return {"cameras": list_cameras(store_id, get_test_database_path())}
+
+
+@app.post("/stores/{store_id}/cameras", status_code=status.HTTP_201_CREATED)
+def create_operational_camera(store_id: int, camera: CameraSettings):
+    return create_camera(store_id, **camera.model_dump())
+
+
+@app.post("/test/stores/{store_id}/cameras", status_code=status.HTTP_201_CREATED)
+def create_test_camera(store_id: int, camera: CameraSettings):
+    return create_camera(store_id, **camera.model_dump(), database_path=get_test_database_path())
+
+
+@app.put("/stores/{store_id}/cameras/{camera_id}")
+def update_operational_camera(store_id: int, camera_id: int, camera: CameraSettings):
+    return update_camera(store_id, camera_id, **camera.model_dump())
+
+
+@app.put("/test/stores/{store_id}/cameras/{camera_id}")
+def update_test_camera(store_id: int, camera_id: int, camera: CameraSettings):
+    return update_camera(store_id, camera_id, **camera.model_dump(), database_path=get_test_database_path())
+
+
+@app.delete("/stores/{store_id}/cameras/{camera_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_operational_camera(store_id: int, camera_id: int):
+    delete_camera(store_id, camera_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@app.delete("/test/stores/{store_id}/cameras/{camera_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_test_camera(store_id: int, camera_id: int):
+    delete_camera(store_id, camera_id, get_test_database_path())
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @app.put("/configuration/stores/{store_id}/primary-camera")
