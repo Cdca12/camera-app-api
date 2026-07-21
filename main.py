@@ -24,8 +24,10 @@ from configuration import (
     delete_camera,
     delete_store,
     get_configuration,
+    get_store_camera_config,
     list_cameras,
     save_primary_camera,
+    save_store_camera_config,
     update_camera,
     update_store,
 )
@@ -71,6 +73,7 @@ class CameraConfig(BaseModel):
 
 class CameraChannelScanRequest(BaseModel):
     max_channels: int = 16
+    store_id: int
 
 
 class StoreSettings(BaseModel):
@@ -95,6 +98,8 @@ class PrimaryCameraSettings(BaseModel):
 
 runtime_camera_config: dict[str, str] = {}
 test_runtime_camera_config: dict[str, str] = {}
+store_runtime_camera_configs: dict[int, dict[str, str]] = {}
+test_store_runtime_camera_configs: dict[int, dict[str, str]] = {}
 face_cache: dict[str, list[dict]] = {}
 face_detector = cv2.CascadeClassifier(
     cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
@@ -267,6 +272,34 @@ def delete_test_camera(store_id: int, camera_id: int):
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
+@app.get("/stores/{store_id}/camera-config")
+def operational_store_camera_config(store_id: int):
+    return {"config": get_store_camera_config(store_id), "runtime_configured": store_id in store_runtime_camera_configs}
+
+
+@app.get("/test/stores/{store_id}/camera-config")
+def test_store_camera_config(store_id: int):
+    return {"config": get_store_camera_config(store_id, get_test_database_path()), "runtime_configured": store_id in test_store_runtime_camera_configs}
+
+
+@app.put("/stores/{store_id}/camera-config")
+def save_operational_store_camera_config(store_id: int, config: CameraConfig):
+    global store_runtime_camera_configs
+    runtime_config = normalize_runtime_camera_config(config)
+    saved_config = save_store_camera_config(store_id, **get_public_camera_config(runtime_config))
+    store_runtime_camera_configs[store_id] = runtime_config
+    return {"config": saved_config, "runtime_configured": True}
+
+
+@app.put("/test/stores/{store_id}/camera-config")
+def save_test_store_camera_config(store_id: int, config: CameraConfig):
+    global test_store_runtime_camera_configs
+    runtime_config = normalize_runtime_camera_config(config)
+    saved_config = save_store_camera_config(store_id, **get_public_camera_config(runtime_config), database_path=get_test_database_path())
+    test_store_runtime_camera_configs[store_id] = runtime_config
+    return {"config": saved_config, "runtime_configured": True}
+
+
 @app.put("/configuration/stores/{store_id}/primary-camera")
 def configuration_primary_camera(
     store_id: int,
@@ -370,13 +403,22 @@ def test_camera_config(config: CameraConfig):
 
 @app.post("/camera-channels/scan")
 def scan_camera_channels(request: CameraChannelScanRequest):
+    return _scan_camera_channels(request, store_runtime_camera_configs)
+
+
+@app.post("/test/camera-channels/scan")
+def test_scan_camera_channels(request: CameraChannelScanRequest):
+    return _scan_camera_channels(request, test_store_runtime_camera_configs)
+
+
+def _scan_camera_channels(request: CameraChannelScanRequest, runtime_configs: dict[int, dict[str, str]]):
     max_channels = max(1, min(request.max_channels, 8))
     discovered_cameras = []
     scanned_channels = 0
     scan_deadline = time.monotonic() + 4
 
     try:
-        get_camera_source("101")
+        get_camera_source("101", runtime_configs.get(request.store_id))
     except HTTPException as error:
         raise HTTPException(
             status_code=400,
@@ -391,7 +433,7 @@ def scan_camera_channels(request: CameraChannelScanRequest):
         scanned_channels = camera_number
 
         try:
-            camera_source = get_camera_source(channel)
+            camera_source = get_camera_source(channel, runtime_configs.get(request.store_id))
             dimensions = probe_camera_source(
                 camera_source,
                 get_camera_scan_timeout_ms(),
@@ -668,7 +710,7 @@ def probe_camera_source_worker(
         capture.release()
 
 
-def get_camera_source(channel: Optional[str] = None):
+def get_camera_source(channel: Optional[str] = None, store_config: Optional[dict[str, str]] = None):
     channel = normalize_channel(channel)
 
     if channel:
@@ -677,7 +719,7 @@ def get_camera_source(channel: Optional[str] = None):
         if channel_source:
             return normalize_camera_source(channel_source)
 
-    runtime_source = get_runtime_camera_source(channel)
+    runtime_source = build_rtsp_source(store_config, channel) if store_config else get_runtime_camera_source(channel)
 
     if runtime_source:
         return normalize_camera_source(runtime_source)

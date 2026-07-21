@@ -182,6 +182,35 @@ def delete_store(store_id: int, database_path: Path | None = None) -> None:
         connection.commit()
 
 
+def get_store_camera_config(store_id: int, database_path: Path | None = None) -> dict | None:
+    with database_connection(database_path) as connection:
+        _require_active_store(connection, store_id)
+        row = connection.execute(
+            "SELECT host, username, port, path_template FROM store_camera_configs WHERE store_id = ?",
+            (store_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def save_store_camera_config(store_id: int, host: str, username: str, port: str, path_template: str, database_path: Path | None = None) -> dict:
+    values = {"host": host.strip(), "username": username.strip(), "port": str(port).strip() or "554", "path_template": path_template.strip()}
+    if not all([values["host"], values["username"], values["path_template"]]):
+        raise HTTPException(status_code=422, detail="Host, usuario y ruta RTSP son obligatorios")
+    if not values["path_template"].startswith("/"):
+        values["path_template"] = "/" + values["path_template"]
+    with database_connection(database_path) as connection:
+        _require_active_store(connection, store_id)
+        connection.execute(
+            """INSERT INTO store_camera_configs (store_id, host, username, port, path_template)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(store_id) DO UPDATE SET host=excluded.host, username=excluded.username,
+            port=excluded.port, path_template=excluded.path_template, updated_at=CURRENT_TIMESTAMP""",
+            (store_id, values["host"], values["username"], values["port"], values["path_template"]),
+        )
+        connection.commit()
+    return values
+
+
 def list_cameras(store_id: int, database_path: Path | None = None) -> list[dict]:
     with database_connection(database_path) as connection:
         _require_active_store(connection, store_id)

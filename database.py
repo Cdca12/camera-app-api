@@ -76,6 +76,16 @@ def initialize_database(database_path: Path | None = None) -> None:
                 FOREIGN KEY (store_id) REFERENCES stores(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS store_camera_configs (
+                store_id INTEGER PRIMARY KEY,
+                host TEXT NOT NULL,
+                username TEXT NOT NULL,
+                port TEXT NOT NULL DEFAULT '554',
+                path_template TEXT NOT NULL,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (store_id) REFERENCES stores(id) ON DELETE CASCADE
+            );
+
             CREATE TABLE IF NOT EXISTS visitor_events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 store_id INTEGER NOT NULL,
