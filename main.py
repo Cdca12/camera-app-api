@@ -708,9 +708,9 @@ def probe_camera_source_direct(
     try:
         with suppress_stderr():
             is_opened = capture.open(camera_source)
-            success, frame = capture.read() if is_opened else (False, None)
+            frame = read_camera_probe_frame(capture) if is_opened else None
 
-        if success and frame is not None:
+        if frame is not None:
             height, width = frame.shape[:2]
             return width, height, build_camera_preview(frame)
     finally:
@@ -720,6 +720,9 @@ def probe_camera_source_direct(
 
 
 def build_camera_preview(frame: np.ndarray) -> str | None:
+    if not is_preview_frame_usable(frame):
+        return None
+
     height, width = frame.shape[:2]
     preview_width = min(width, 220)
     preview_height = max(1, round(height * (preview_width / width)))
@@ -737,6 +740,30 @@ def build_camera_preview(frame: np.ndarray) -> str | None:
     return f"data:image/jpeg;base64,{payload}"
 
 
+def read_camera_probe_frame(capture: cv2.VideoCapture) -> np.ndarray | None:
+    fallback_frame = None
+
+    # Algunos NVR entregan un frame plano mientras termina de abrirse el
+    # stream. Leemos unos frames adicionales y priorizamos uno utilizable.
+    for _ in range(3):
+        success, frame = capture.read()
+        if not success or frame is None:
+            continue
+
+        fallback_frame = frame
+        if is_preview_frame_usable(frame):
+            return frame
+
+    return fallback_frame
+
+
+def is_preview_frame_usable(frame: np.ndarray) -> bool:
+    grayscale = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    average_brightness = float(grayscale.mean())
+    contrast = float(grayscale.std())
+    return 8 < average_brightness < 247 and contrast >= 8
+
+
 def probe_camera_source_worker(
     camera_source: str | int,
     timeout_ms: int,
@@ -749,9 +776,9 @@ def probe_camera_source_worker(
     try:
         with suppress_stderr():
             is_opened = capture.open(camera_source)
-            success, frame = capture.read() if is_opened else (False, None)
+            frame = read_camera_probe_frame(capture) if is_opened else None
 
-        if success and frame is not None:
+        if frame is not None:
             height, width = frame.shape[:2]
             result_queue.put((width, height, build_camera_preview(frame)))
     finally:
