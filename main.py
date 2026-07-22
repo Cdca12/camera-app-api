@@ -415,7 +415,7 @@ def _scan_camera_channels(request: CameraChannelScanRequest, runtime_configs: di
     max_channels = max(1, min(request.max_channels, 8))
     discovered_cameras = []
     scanned_channels = 0
-    scan_deadline = time.monotonic() + 4
+    scan_deadline = time.monotonic() + get_camera_scan_total_timeout_seconds()
 
     try:
         get_camera_source("101", runtime_configs.get(request.store_id))
@@ -1189,6 +1189,15 @@ def get_camera_scan_timeout_ms() -> int:
         return max(250, int(timeout))
     except ValueError:
         return 1200
+
+
+def get_camera_scan_total_timeout_seconds() -> float:
+    timeout = os.getenv("CAMERA_SCAN_TOTAL_TIMEOUT_SECONDS", "12")
+
+    try:
+        return max(4, float(timeout))
+    except ValueError:
+        return 12
 
 
 def normalize_face(face: dict) -> dict:
