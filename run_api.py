@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import multiprocessing
 import socket
 
 import uvicorn
@@ -44,4 +45,5 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    multiprocessing.freeze_support()
     main()

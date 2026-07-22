@@ -663,7 +663,10 @@ def capture_camera_frame(
 
 
 def probe_camera_source(camera_source: str | int, timeout_ms: int) -> tuple[int, int] | None:
-    context = multiprocessing.get_context("fork")
+    # Windows no incluye el modo "fork". Usamos "spawn" ahí para que el
+    # escaneo de canales pueda aislar y limitar cada intento de conexión RTSP.
+    start_method = "spawn" if os.name == "nt" else "fork"
+    context = multiprocessing.get_context(start_method)
     result_queue = context.Queue(maxsize=1)
     process = context.Process(
         target=probe_camera_source_worker,
