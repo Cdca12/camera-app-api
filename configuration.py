@@ -5,7 +5,8 @@ from pathlib import Path
 
 from fastapi import HTTPException
 
-from database import database_connection
+from credential_store import decrypt_local_secret, encrypt_local_secret
+from database import database_connection, get_database_path
 
 
 STORE_CODE_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -192,20 +193,60 @@ def get_store_camera_config(store_id: int, database_path: Path | None = None) ->
     return dict(row) if row else None
 
 
-def save_store_camera_config(store_id: int, host: str, username: str, port: str, path_template: str, database_path: Path | None = None) -> dict:
+def get_store_runtime_camera_config(store_id: int, database_path: Path | None = None) -> dict | None:
+    resolved_database_path = database_path or get_database_path()
+    with database_connection(resolved_database_path) as connection:
+        _require_active_store(connection, store_id)
+        row = connection.execute(
+            """SELECT host, username, password_ciphertext, port, path_template
+            FROM store_camera_configs WHERE store_id = ?""",
+            (store_id,),
+        ).fetchone()
+
+    if row is None or not row["password_ciphertext"]:
+        return None
+
+    try:
+        password = decrypt_local_secret(row["password_ciphertext"], resolved_database_path)
+    except ValueError as error:
+        raise HTTPException(status_code=500, detail=str(error)) from error
+
+    return {
+        "host": row["host"],
+        "username": row["username"],
+        "password": password,
+        "port": row["port"],
+        "path_template": row["path_template"],
+    }
+
+
+def save_store_camera_config(store_id: int, host: str, username: str, password: str, port: str, path_template: str, database_path: Path | None = None) -> dict:
+    resolved_database_path = database_path or get_database_path()
     values = {"host": host.strip(), "username": username.strip(), "port": str(port).strip() or "554", "path_template": path_template.strip()}
     if not all([values["host"], values["username"], values["path_template"]]):
         raise HTTPException(status_code=422, detail="Host, usuario y ruta RTSP son obligatorios")
     if not values["path_template"].startswith("/"):
         values["path_template"] = "/" + values["path_template"]
-    with database_connection(database_path) as connection:
+    with database_connection(resolved_database_path) as connection:
         _require_active_store(connection, store_id)
+        existing = connection.execute(
+            "SELECT password_ciphertext FROM store_camera_configs WHERE store_id = ?",
+            (store_id,),
+        ).fetchone()
+        password_ciphertext = (
+            encrypt_local_secret(password, resolved_database_path)
+            if password
+            else (existing["password_ciphertext"] if existing else None)
+        )
+        if not password_ciphertext:
+            raise HTTPException(status_code=422, detail="La contraseña RTSP es obligatoria la primera vez")
         connection.execute(
-            """INSERT INTO store_camera_configs (store_id, host, username, port, path_template)
-            VALUES (?, ?, ?, ?, ?)
+            """INSERT INTO store_camera_configs (store_id, host, username, password_ciphertext, port, path_template)
+            VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(store_id) DO UPDATE SET host=excluded.host, username=excluded.username,
-            port=excluded.port, path_template=excluded.path_template, updated_at=CURRENT_TIMESTAMP""",
-            (store_id, values["host"], values["username"], values["port"], values["path_template"]),
+            password_ciphertext=excluded.password_ciphertext, port=excluded.port,
+            path_template=excluded.path_template, updated_at=CURRENT_TIMESTAMP""",
+            (store_id, values["host"], values["username"], password_ciphertext, values["port"], values["path_template"]),
         )
         connection.commit()
     return values

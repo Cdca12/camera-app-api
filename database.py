@@ -82,6 +82,7 @@ def initialize_database(database_path: Path | None = None) -> None:
                 store_id INTEGER PRIMARY KEY,
                 host TEXT NOT NULL,
                 username TEXT NOT NULL,
+                password_ciphertext TEXT,
                 port TEXT NOT NULL DEFAULT '554',
                 path_template TEXT NOT NULL,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -134,6 +135,17 @@ def initialize_database(database_path: Path | None = None) -> None:
                 """
                 ALTER TABLE visitor_events
                 ADD COLUMN data_source TEXT NOT NULL DEFAULT 'simulated'
+                """
+            )
+        config_columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(store_camera_configs)").fetchall()
+        }
+        if "password_ciphertext" not in config_columns:
+            connection.execute(
+                """
+                ALTER TABLE store_camera_configs
+                ADD COLUMN password_ciphertext TEXT
                 """
             )
         connection.execute(

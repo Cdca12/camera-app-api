@@ -26,6 +26,7 @@ from configuration import (
     delete_store,
     get_configuration,
     get_store_camera_config,
+    get_store_runtime_camera_config,
     list_cameras,
     save_primary_camera,
     save_store_camera_config,
@@ -67,7 +68,7 @@ initialize_test_database()
 class CameraConfig(BaseModel):
     host: str
     username: str
-    password: str
+    password: str = ""
     port: str = "554"
     path_template: str = "/Streaming/Channels/{channel}"
 
@@ -275,19 +276,22 @@ def delete_test_camera(store_id: int, camera_id: int):
 
 @app.get("/stores/{store_id}/camera-config")
 def operational_store_camera_config(store_id: int):
-    return {"config": get_store_camera_config(store_id), "runtime_configured": store_id in store_runtime_camera_configs}
+    runtime_config = get_or_restore_store_runtime_config(store_id, store_runtime_camera_configs)
+    return {"config": get_store_camera_config(store_id), "runtime_configured": runtime_config is not None}
 
 
 @app.get("/test/stores/{store_id}/camera-config")
 def test_store_camera_config(store_id: int):
-    return {"config": get_store_camera_config(store_id, get_test_database_path()), "runtime_configured": store_id in test_store_runtime_camera_configs}
+    test_database_path = get_test_database_path()
+    runtime_config = get_or_restore_store_runtime_config(store_id, test_store_runtime_camera_configs, test_database_path)
+    return {"config": get_store_camera_config(store_id, test_database_path), "runtime_configured": runtime_config is not None}
 
 
 @app.put("/stores/{store_id}/camera-config")
 def save_operational_store_camera_config(store_id: int, config: CameraConfig):
     global store_runtime_camera_configs
-    runtime_config = normalize_runtime_camera_config(config)
-    saved_config = save_store_camera_config(store_id, **get_public_camera_config(runtime_config))
+    saved_config = save_store_camera_config(store_id, **config.model_dump())
+    runtime_config = get_store_runtime_camera_config(store_id)
     store_runtime_camera_configs[store_id] = runtime_config
     return {"config": saved_config, "runtime_configured": True}
 
@@ -295,8 +299,9 @@ def save_operational_store_camera_config(store_id: int, config: CameraConfig):
 @app.put("/test/stores/{store_id}/camera-config")
 def save_test_store_camera_config(store_id: int, config: CameraConfig):
     global test_store_runtime_camera_configs
-    runtime_config = normalize_runtime_camera_config(config)
-    saved_config = save_store_camera_config(store_id, **get_public_camera_config(runtime_config), database_path=get_test_database_path())
+    test_database_path = get_test_database_path()
+    saved_config = save_store_camera_config(store_id, **config.model_dump(), database_path=test_database_path)
+    runtime_config = get_store_runtime_camera_config(store_id, test_database_path)
     test_store_runtime_camera_configs[store_id] = runtime_config
     return {"config": saved_config, "runtime_configured": True}
 
@@ -409,17 +414,41 @@ def scan_camera_channels(request: CameraChannelScanRequest):
 
 @app.post("/test/camera-channels/scan")
 def test_scan_camera_channels(request: CameraChannelScanRequest):
-    return _scan_camera_channels(request, test_store_runtime_camera_configs)
+    return _scan_camera_channels(request, test_store_runtime_camera_configs, get_test_database_path())
 
 
-def _scan_camera_channels(request: CameraChannelScanRequest, runtime_configs: dict[int, dict[str, str]]):
+def get_or_restore_store_runtime_config(
+    store_id: int,
+    runtime_configs: dict[int, dict[str, str]],
+    database_path=None,
+) -> dict[str, str] | None:
+    runtime_config = runtime_configs.get(store_id)
+    if runtime_config is not None:
+        return runtime_config
+
+    runtime_config = get_store_runtime_camera_config(store_id, database_path)
+    if runtime_config is not None:
+        runtime_configs[store_id] = runtime_config
+    return runtime_config
+
+
+def _scan_camera_channels(
+    request: CameraChannelScanRequest,
+    runtime_configs: dict[int, dict[str, str]],
+    database_path=None,
+):
     max_channels = max(1, min(request.max_channels, 8))
     discovered_cameras = []
     scanned_channels = 0
     scan_deadline = time.monotonic() + get_camera_scan_total_timeout_seconds()
+    runtime_config = get_or_restore_store_runtime_config(
+        request.store_id,
+        runtime_configs,
+        database_path,
+    )
 
     try:
-        get_camera_source("101", runtime_configs.get(request.store_id))
+        get_camera_source("101", runtime_config)
     except HTTPException as error:
         raise HTTPException(
             status_code=400,
@@ -434,7 +463,7 @@ def _scan_camera_channels(request: CameraChannelScanRequest, runtime_configs: di
         scanned_channels = camera_number
 
         try:
-            camera_source = get_camera_source(channel, runtime_configs.get(request.store_id))
+            camera_source = get_camera_source(channel, runtime_config)
             dimensions = probe_camera_source(
                 camera_source,
                 get_camera_scan_timeout_ms(),
@@ -640,7 +669,11 @@ def capture_camera_frame(
     timeout_ms: Optional[int] = None,
     store_id: Optional[int] = None,
 ) -> np.ndarray:
-    store_config = store_runtime_camera_configs.get(store_id) if store_id else None
+    store_config = (
+        get_or_restore_store_runtime_config(store_id, store_runtime_camera_configs)
+        if store_id
+        else None
+    )
     camera_source = get_camera_source(channel, store_config)
     timeout_ms = timeout_ms or get_camera_timeout_ms()
     capture = cv2.VideoCapture()
