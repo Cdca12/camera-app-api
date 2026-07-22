@@ -204,6 +204,7 @@ def initialize_operational_database() -> Path:
         _copy_captured_data(LEGACY_DATABASE_PATH, operational_database_path)
 
     ensure_local_store(operational_database_path)
+    purge_incomplete_captured_events(operational_database_path)
 
     return operational_database_path
 
@@ -223,6 +224,19 @@ def ensure_local_store(database_path: Path | None = None) -> int:
         connection.commit()
 
     return int(store["id"])
+
+
+def purge_incomplete_captured_events(database_path: Path | None = None) -> None:
+    """Removes old operational captures that lack age or gender data."""
+    with database_connection(database_path) as connection:
+        connection.execute(
+            """
+            DELETE FROM visitor_events
+            WHERE data_source = 'captured'
+              AND (gender = 'unknown' OR age_estimate IS NULL OR age_bucket = 'unknown')
+            """
+        )
+        connection.commit()
 
 
 def _copy_simulated_data(source_path: Path, target_path: Path) -> None:

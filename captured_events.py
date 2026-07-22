@@ -110,9 +110,9 @@ def record_captured_faces(
 
 def normalize_gender(value: object) -> str:
     normalized = str(value or "").lower()
-    if normalized in {"female", "woman", "feminine"}:
+    if normalized in {"female", "woman", "feminine", "femenino"}:
         return "female"
-    if normalized in {"male", "man", "masculine"}:
+    if normalized in {"male", "man", "masculine", "masculino"}:
         return "male"
     return "unknown"
 
@@ -126,6 +126,15 @@ def normalize_age(value: object) -> int | None:
 
 def normalize_age_bucket(value: object) -> str:
     normalized = str(value or "unknown")
+    display_buckets = {
+        "Menor de 18": "under_18",
+        "18-24": "18_24",
+        "25-34": "25_34",
+        "35-44": "35_44",
+        "45-54": "45_54",
+        "55+": "55_plus",
+    }
+    normalized = display_buckets.get(normalized, normalized)
     valid_buckets = {
         "under_18",
         "18_24",

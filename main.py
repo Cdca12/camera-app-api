@@ -1122,14 +1122,21 @@ def watch_frame_for_new_faces(
 
         image_np = cv2.cvtColor(face_crop, cv2.COLOR_BGR2RGB)
         analysis = analyze_image(image_np)
-        remember_light_face(cache_key, detected_face)
+        has_valid_analysis = False
 
         for analyzed_face in analysis["faces"]:
+            if not has_complete_face_analysis(analyzed_face):
+                continue
+
             analyzed_face["source"] = source
             analyzed_face["camera_name"] = camera_name
             analyzed_face["channel"] = channel
             analyzed_face["region"] = detected_face["region"]
             analyzed_faces.append(analyzed_face)
+            has_valid_analysis = True
+
+        if has_valid_analysis:
+            remember_light_face(cache_key, detected_face)
 
     recorded_events = record_captured_faces(
         store_id,
@@ -1145,6 +1152,19 @@ def watch_frame_for_new_faces(
         "faces": analyzed_faces,
         "recorded_events": recorded_events,
     }
+
+
+def has_complete_face_analysis(face: dict) -> bool:
+    """Only persist detections with a usable age and gender classification."""
+    age = face.get("age")
+    gender = str(face.get("gender") or "").strip().lower()
+
+    try:
+        normalized_age = int(round(float(age)))
+    except (TypeError, ValueError):
+        return False
+
+    return normalized_age > 0 and gender in {"masculino", "femenino"}
 
 
 def get_new_light_faces(
