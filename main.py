@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
+import base64
 
 from fastapi import FastAPI, File, UploadFile, HTTPException, Query, Response, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -444,13 +445,14 @@ def _scan_camera_channels(request: CameraChannelScanRequest, runtime_configs: di
         if dimensions is None:
             continue
 
-        width, height = dimensions
+        width, height, preview_image = dimensions
         discovered_cameras.append(
             {
                 "name": f"Cámara {camera_number}",
                 "channel": channel,
                 "width": width,
                 "height": height,
+                "preview_image": preview_image,
             }
         )
 
@@ -662,7 +664,7 @@ def capture_camera_frame(
         capture.release()
 
 
-def probe_camera_source(camera_source: str | int, timeout_ms: int) -> tuple[int, int] | None:
+def probe_camera_source(camera_source: str | int, timeout_ms: int) -> tuple[int, int, str | None] | None:
     # Windows no incluye el modo "fork". Crear un proceso con "spawn"
     # reimporta el servicio completo y puede tardar más que el handshake RTSP,
     # así que allí confiamos en los timeouts nativos de OpenCV.
@@ -698,7 +700,7 @@ def probe_camera_source(camera_source: str | int, timeout_ms: int) -> tuple[int,
 def probe_camera_source_direct(
     camera_source: str | int,
     timeout_ms: int,
-) -> tuple[int, int] | None:
+) -> tuple[int, int, str | None] | None:
     capture = cv2.VideoCapture()
     capture.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, timeout_ms)
     capture.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, timeout_ms)
@@ -710,11 +712,29 @@ def probe_camera_source_direct(
 
         if success and frame is not None:
             height, width = frame.shape[:2]
-            return width, height
+            return width, height, build_camera_preview(frame)
     finally:
         capture.release()
 
     return None
+
+
+def build_camera_preview(frame: np.ndarray) -> str | None:
+    height, width = frame.shape[:2]
+    preview_width = min(width, 220)
+    preview_height = max(1, round(height * (preview_width / width)))
+    preview = cv2.resize(frame, (preview_width, preview_height), interpolation=cv2.INTER_AREA)
+    encoded, image = cv2.imencode(
+        ".jpg",
+        preview,
+        [cv2.IMWRITE_JPEG_QUALITY, 70],
+    )
+
+    if not encoded:
+        return None
+
+    payload = base64.b64encode(image.tobytes()).decode("ascii")
+    return f"data:image/jpeg;base64,{payload}"
 
 
 def probe_camera_source_worker(
@@ -733,7 +753,7 @@ def probe_camera_source_worker(
 
         if success and frame is not None:
             height, width = frame.shape[:2]
-            result_queue.put((width, height))
+            result_queue.put((width, height, build_camera_preview(frame)))
     finally:
         capture.release()
 
