@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import uuid
 from contextlib import contextmanager
+from datetime import date
 from pathlib import Path
 from typing import Iterator
 
@@ -153,6 +155,7 @@ def initialize_test_database() -> Path:
         ).fetchone()[0]
 
     if test_event_count:
+        _ensure_test_data_for_today(test_database_path)
         return test_database_path
 
     source_paths = [LEGACY_DATABASE_PATH, get_database_path()]
@@ -164,6 +167,7 @@ def initialize_test_database() -> Path:
                 if connection.execute("SELECT COUNT(*) FROM visitor_events").fetchone()[0]:
                     break
 
+    _ensure_test_data_for_today(test_database_path)
     return test_database_path
 
 
@@ -180,6 +184,50 @@ def initialize_operational_database() -> Path:
 
 def _copy_simulated_data(source_path: Path, target_path: Path) -> None:
     _copy_data_by_source(source_path, target_path, "simulated")
+
+
+def _ensure_test_data_for_today(test_database_path: Path) -> None:
+    today = date.today().isoformat()
+    with database_connection(test_database_path) as connection:
+        has_today_data = connection.execute(
+            "SELECT 1 FROM visitor_events WHERE data_source = 'simulated' AND captured_at LIKE ? LIMIT 1",
+            (f"{today}%",),
+        ).fetchone()
+        if has_today_data:
+            return
+
+        source_date_row = connection.execute(
+            "SELECT MAX(substr(captured_at, 1, 10)) AS date FROM visitor_events WHERE data_source = 'simulated'"
+        ).fetchone()
+        source_date = source_date_row["date"]
+        if not source_date:
+            return
+
+        rows = connection.execute(
+            """
+            SELECT store_id, camera_id, captured_at, gender, age_estimate, age_bucket,
+                   confidence, counting_direction
+            FROM visitor_events
+            WHERE data_source = 'simulated' AND captured_at LIKE ?
+            """,
+            (f"{source_date}%",),
+        ).fetchall()
+        events = [
+            (
+                row["store_id"], row["camera_id"],
+                str(uuid.uuid5(uuid.NAMESPACE_URL, f"test-today:{today}:{index}")),
+                f"{today}{row['captured_at'][10:]}", row["gender"], row["age_estimate"],
+                row["age_bucket"], row["confidence"], "simulated", row["counting_direction"],
+            )
+            for index, row in enumerate(rows)
+        ]
+        connection.executemany(
+            """INSERT INTO visitor_events (store_id, camera_id, event_uuid, captured_at, gender,
+            age_estimate, age_bucket, confidence, data_source, counting_direction)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            events,
+        )
+        connection.commit()
 
 
 def _copy_captured_data(source_path: Path, target_path: Path) -> None:
