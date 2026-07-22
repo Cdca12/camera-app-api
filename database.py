@@ -72,6 +72,7 @@ def initialize_database(database_path: Path | None = None) -> None:
                 channel TEXT NOT NULL,
                 location TEXT,
                 is_active INTEGER NOT NULL DEFAULT 1 CHECK (is_active IN (0, 1)),
+                collection_enabled INTEGER NOT NULL DEFAULT 0 CHECK (collection_enabled IN (0, 1)),
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE (store_id, channel),
@@ -146,6 +147,17 @@ def initialize_database(database_path: Path | None = None) -> None:
                 """
                 ALTER TABLE store_camera_configs
                 ADD COLUMN password_ciphertext TEXT
+                """
+            )
+        camera_columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(cameras)").fetchall()
+        }
+        if "collection_enabled" not in camera_columns:
+            connection.execute(
+                """
+                ALTER TABLE cameras
+                ADD COLUMN collection_enabled INTEGER NOT NULL DEFAULT 0
                 """
             )
         connection.execute(

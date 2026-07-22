@@ -257,7 +257,7 @@ def list_cameras(store_id: int, database_path: Path | None = None) -> list[dict]
         _require_active_store(connection, store_id)
         rows = connection.execute(
             """
-            SELECT id, store_id, name, channel, location, is_active
+            SELECT id, store_id, name, channel, location, is_active, collection_enabled
             FROM cameras
             WHERE store_id = ?
             ORDER BY id
@@ -267,12 +267,29 @@ def list_cameras(store_id: int, database_path: Path | None = None) -> list[dict]
     return [_camera_payload(row) for row in rows]
 
 
+def list_collection_enabled_cameras(database_path: Path | None = None) -> list[dict]:
+    with database_connection(database_path) as connection:
+        rows = connection.execute(
+            """
+            SELECT cameras.id, cameras.store_id, cameras.name, cameras.channel
+            FROM cameras
+            JOIN stores ON stores.id = cameras.store_id
+            WHERE stores.is_active = 1
+              AND cameras.is_active = 1
+              AND cameras.collection_enabled = 1
+            ORDER BY cameras.store_id, cameras.id
+            """
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def create_camera(
     store_id: int,
     name: str,
     channel: str,
     location: str = "",
     is_active: bool = True,
+    collection_enabled: bool = False,
     database_path: Path | None = None,
 ) -> dict:
     normalized_name, normalized_channel, normalized_location = _normalize_camera_fields(name, channel, location)
@@ -281,10 +298,10 @@ def create_camera(
             _require_active_store(connection, store_id)
             cursor = connection.execute(
                 """
-                INSERT INTO cameras (store_id, name, channel, location, is_active)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO cameras (store_id, name, channel, location, is_active, collection_enabled)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (store_id, normalized_name, normalized_channel, normalized_location, int(is_active)),
+                (store_id, normalized_name, normalized_channel, normalized_location, int(is_active), int(collection_enabled)),
             )
             connection.commit()
     except Exception as error:
@@ -299,6 +316,7 @@ def create_camera(
         "channel": normalized_channel,
         "location": normalized_location,
         "is_active": is_active,
+        "collection_enabled": collection_enabled,
     }
 
 
@@ -309,6 +327,7 @@ def update_camera(
     channel: str,
     location: str = "",
     is_active: bool = True,
+    collection_enabled: bool = False,
     database_path: Path | None = None,
 ) -> dict:
     normalized_name, normalized_channel, normalized_location = _normalize_camera_fields(name, channel, location)
@@ -318,10 +337,10 @@ def update_camera(
             cursor = connection.execute(
                 """
                 UPDATE cameras
-                SET name = ?, channel = ?, location = ?, is_active = ?, updated_at = CURRENT_TIMESTAMP
+                SET name = ?, channel = ?, location = ?, is_active = ?, collection_enabled = ?, updated_at = CURRENT_TIMESTAMP
                 WHERE id = ? AND store_id = ?
                 """,
-                (normalized_name, normalized_channel, normalized_location, int(is_active), camera_id, store_id),
+                (normalized_name, normalized_channel, normalized_location, int(is_active), int(collection_enabled), camera_id, store_id),
             )
             if cursor.rowcount == 0:
                 raise HTTPException(status_code=404, detail="Cámara no encontrada")
@@ -340,6 +359,7 @@ def update_camera(
         "channel": normalized_channel,
         "location": normalized_location,
         "is_active": is_active,
+        "collection_enabled": collection_enabled,
     }
 
 
@@ -381,6 +401,7 @@ def _camera_payload(row) -> dict:
         "channel": row["channel"],
         "location": row["location"],
         "is_active": bool(row["is_active"]),
+        "collection_enabled": bool(row["collection_enabled"]),
     }
 
 

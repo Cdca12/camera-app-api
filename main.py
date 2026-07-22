@@ -13,6 +13,8 @@ import cv2
 import io
 import os
 import multiprocessing
+import logging
+import threading
 from contextlib import contextmanager
 from urllib.parse import quote
 from typing import Optional
@@ -27,6 +29,7 @@ from configuration import (
     get_configuration,
     get_store_camera_config,
     get_store_runtime_camera_config,
+    list_collection_enabled_cameras,
     list_cameras,
     save_primary_camera,
     save_store_camera_config,
@@ -89,6 +92,7 @@ class CameraSettings(BaseModel):
     channel: str
     location: str = ""
     is_active: bool = True
+    collection_enabled: bool = False
 
 
 class PrimaryCameraSettings(BaseModel):
@@ -103,6 +107,8 @@ test_runtime_camera_config: dict[str, str] = {}
 store_runtime_camera_configs: dict[int, dict[str, str]] = {}
 test_store_runtime_camera_configs: dict[int, dict[str, str]] = {}
 face_cache: dict[str, list[dict]] = {}
+collection_monitor_stop = threading.Event()
+collection_monitor_thread: threading.Thread | None = None
 face_detector = cv2.CascadeClassifier(
     cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
 )
@@ -113,6 +119,26 @@ app = FastAPI(
     description="API local para analizar edad y género usando DeepFace.",
     version="0.1.0",
 )
+logger = logging.getLogger("camera-app-api")
+
+
+@app.on_event("startup")
+def start_collection_monitor() -> None:
+    global collection_monitor_thread
+    if collection_monitor_thread and collection_monitor_thread.is_alive():
+        return
+    collection_monitor_stop.clear()
+    collection_monitor_thread = threading.Thread(
+        target=run_collection_monitor,
+        name="camera-collection-monitor",
+        daemon=True,
+    )
+    collection_monitor_thread.start()
+
+
+@app.on_event("shutdown")
+def stop_collection_monitor() -> None:
+    collection_monitor_stop.set()
 
 
 def get_allowed_origins() -> list[str]:
@@ -596,6 +622,34 @@ def watch_camera_frame(
             "people_count": 0,
             "faces": [],
         }
+
+
+def run_collection_monitor() -> None:
+    while not collection_monitor_stop.is_set():
+        for camera in list_collection_enabled_cameras():
+            if collection_monitor_stop.is_set():
+                break
+            try:
+                frame = capture_camera_frame(
+                    camera["channel"],
+                    store_id=camera["store_id"],
+                )
+                watch_frame_for_new_faces(
+                    frame=frame,
+                    cache_key=f"store:{camera['store_id']}:camera:{camera['id']}",
+                    source="Red",
+                    camera_name=camera["name"],
+                    channel=camera["channel"],
+                    store_id=camera["store_id"],
+                )
+            except Exception as error:
+                logger.warning(
+                    "No se pudo recolectar desde la cámara %s: %s",
+                    camera["id"],
+                    error,
+                )
+
+        collection_monitor_stop.wait(get_collection_monitor_interval_seconds())
 
 
 @app.post("/watch-uploaded-frame")
@@ -1284,6 +1338,14 @@ def get_camera_scan_total_timeout_seconds() -> float:
         return max(4, float(timeout))
     except ValueError:
         return 12
+
+
+def get_collection_monitor_interval_seconds() -> float:
+    value = os.getenv("CAMERA_COLLECTION_INTERVAL_SECONDS", "8")
+    try:
+        return max(3, float(value))
+    except ValueError:
+        return 8
 
 
 def normalize_face(face: dict) -> dict:
