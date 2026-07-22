@@ -38,6 +38,7 @@ from configuration import (
 )
 from captured_events import record_captured_faces
 from database import (
+    ensure_local_store,
     get_test_database_path,
     initialize_operational_database,
     initialize_test_database,
@@ -655,7 +656,7 @@ def run_collection_monitor() -> None:
 @app.post("/watch-uploaded-frame")
 async def watch_uploaded_frame(
     file: UploadFile = File(...),
-    store_id: int = Query(1, gt=0),
+    store_id: Optional[int] = Query(default=None, gt=0),
 ):
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(
@@ -672,6 +673,7 @@ async def watch_uploaded_frame(
         )
 
     try:
+        target_store_id = store_id or ensure_local_store()
         image_np = load_image_as_numpy(image_bytes)
         frame = cv2.cvtColor(image_np, cv2.COLOR_RGB2BGR)
 
@@ -681,7 +683,7 @@ async def watch_uploaded_frame(
             source="Dispositivo",
             camera_name="Dispositivo",
             channel=None,
-            store_id=store_id,
+            store_id=target_store_id,
         )
 
     except Exception as error:

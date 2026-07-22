@@ -203,7 +203,26 @@ def initialize_operational_database() -> Path:
     if is_new_database and LEGACY_DATABASE_PATH.exists():
         _copy_captured_data(LEGACY_DATABASE_PATH, operational_database_path)
 
+    ensure_local_store(operational_database_path)
+
     return operational_database_path
+
+
+def ensure_local_store(database_path: Path | None = None) -> int:
+    """Creates the store used by device-local captures when it is missing."""
+    with database_connection(database_path) as connection:
+        connection.execute(
+            """
+            INSERT OR IGNORE INTO stores (name, code, timezone)
+            VALUES ('Local', 'local', 'America/Mazatlan')
+            """
+        )
+        store = connection.execute(
+            "SELECT id FROM stores WHERE code = 'local'"
+        ).fetchone()
+        connection.commit()
+
+    return int(store["id"])
 
 
 def _copy_simulated_data(source_path: Path, target_path: Path) -> None:
