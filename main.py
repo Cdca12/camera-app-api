@@ -493,8 +493,11 @@ async def analyze_frame(file: UploadFile = File(...)):
 
 
 @app.get("/camera-frame")
-def camera_frame(channel: Optional[str] = None):
-    frame = capture_camera_frame(channel)
+def camera_frame(
+    channel: Optional[str] = None,
+    store_id: Optional[int] = Query(default=None, gt=0),
+):
+    frame = capture_camera_frame(channel, store_id=store_id)
     success, encoded_frame = cv2.imencode(".jpg", frame)
 
     if not success:
@@ -514,9 +517,10 @@ def camera_frame(channel: Optional[str] = None):
 def analyze_camera_frame(
     channel: Optional[str] = None,
     camera_name: Optional[str] = None,
+    store_id: Optional[int] = Query(default=None, gt=0),
 ):
     try:
-        frame = capture_camera_frame(channel)
+        frame = capture_camera_frame(channel, store_id=store_id)
         image_np = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         result = analyze_image(image_np)
         result["source"] = "Red"
@@ -542,7 +546,7 @@ def watch_camera_frame(
     store_id: int = Query(1, gt=0),
 ):
     try:
-        frame = capture_camera_frame(channel)
+        frame = capture_camera_frame(channel, store_id=store_id)
         cache_key = get_face_cache_key(channel, camera_name)
         return watch_frame_for_new_faces(
             frame=frame,
@@ -634,8 +638,10 @@ def analyze_image(image_np: np.ndarray) -> dict:
 def capture_camera_frame(
     channel: Optional[str] = None,
     timeout_ms: Optional[int] = None,
+    store_id: Optional[int] = None,
 ) -> np.ndarray:
-    camera_source = get_camera_source(channel)
+    store_config = store_runtime_camera_configs.get(store_id) if store_id else None
+    camera_source = get_camera_source(channel, store_config)
     timeout_ms = timeout_ms or get_camera_timeout_ms()
     capture = cv2.VideoCapture()
     capture.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, timeout_ms)
@@ -651,9 +657,9 @@ def capture_camera_frame(
                     detail="No se pudo abrir la cámara de vigilancia.",
                 )
 
-            success, frame = capture.read()
+            frame = read_camera_probe_frame(capture)
 
-        if not success or frame is None:
+        if frame is None:
             raise HTTPException(
                 status_code=503,
                 detail="No se pudo leer un frame de la cámara de vigilancia.",
