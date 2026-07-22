@@ -663,10 +663,13 @@ def capture_camera_frame(
 
 
 def probe_camera_source(camera_source: str | int, timeout_ms: int) -> tuple[int, int] | None:
-    # Windows no incluye el modo "fork". Usamos "spawn" ahí para que el
-    # escaneo de canales pueda aislar y limitar cada intento de conexión RTSP.
-    start_method = "spawn" if os.name == "nt" else "fork"
-    context = multiprocessing.get_context(start_method)
+    # Windows no incluye el modo "fork". Crear un proceso con "spawn"
+    # reimporta el servicio completo y puede tardar más que el handshake RTSP,
+    # así que allí confiamos en los timeouts nativos de OpenCV.
+    if os.name == "nt":
+        return probe_camera_source_direct(camera_source, timeout_ms)
+
+    context = multiprocessing.get_context("fork")
     result_queue = context.Queue(maxsize=1)
     process = context.Process(
         target=probe_camera_source_worker,
@@ -690,6 +693,28 @@ def probe_camera_source(camera_source: str | int, timeout_ms: int) -> tuple[int,
         result_queue.close()
 
     return result
+
+
+def probe_camera_source_direct(
+    camera_source: str | int,
+    timeout_ms: int,
+) -> tuple[int, int] | None:
+    capture = cv2.VideoCapture()
+    capture.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, timeout_ms)
+    capture.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, timeout_ms)
+
+    try:
+        with suppress_stderr():
+            is_opened = capture.open(camera_source)
+            success, frame = capture.read() if is_opened else (False, None)
+
+        if success and frame is not None:
+            height, width = frame.shape[:2]
+            return width, height
+    finally:
+        capture.release()
+
+    return None
 
 
 def probe_camera_source_worker(
@@ -1158,12 +1183,12 @@ def get_camera_timeout_ms() -> int:
 
 
 def get_camera_scan_timeout_ms() -> int:
-    timeout = os.getenv("CAMERA_SCAN_TIMEOUT_MS", "450")
+    timeout = os.getenv("CAMERA_SCAN_TIMEOUT_MS", "1200")
 
     try:
         return max(250, int(timeout))
     except ValueError:
-        return 450
+        return 1200
 
 
 def normalize_face(face: dict) -> dict:
